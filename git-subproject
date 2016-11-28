@@ -336,7 +336,7 @@ function read-arguments() {
     ALLOWED_ARGS="${MODE^^}_ARGS"
 
     # treat THEIRS special if in mode `init`
-    if [[ "$MODE" == "init" && "$0" != --* ]]; then
+    if [[ "$MODE" == "init" && "$1" != --* ]]; then
         THEIRS="$1"
         shift
     fi
