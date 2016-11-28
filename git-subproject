@@ -294,7 +294,7 @@ function normalize-prefix() {
 }
 
 function read-arguments() {
-    local COMMON_ARGS=( "-m" "--format" )
+    local COMMON_ARGS=( "-m" "--message" "--format" )
     local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" )
     local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--diff3" "--ours" "--theirs" "--union")
     local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
@@ -360,7 +360,7 @@ function read-arguments() {
             --base-prefix=*)
                 BASE_PREFIX=$(normalize-prefix "$VAL")
                 ;;
-            -m)
+            -m|--message)
                 MESSAGE=$2
                 shift
                 ;;
