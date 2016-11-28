@@ -20,6 +20,8 @@ The merge strategy is accompanied by a utility script called **subproject**, tha
  * `-Xmy-prefix=<prefix>`: Merge to sub-directory \<prefix\> of target branch
  * `-Xbase=<base-id>`: Use the given commit id as base revision during 3way merge instead (usefull when re-merging after `git merge --squash`)
  * `-Xbase-prefix=<prefix>: The (old) \<prefix\> applicable to the base if different from `their-prefix` (because the directory has been renamed)
+ * `-Xdiff3`: Show conflicts in "diff3" style, which means that the common ancestor's version is included in confict markers
+ * `-Xours|-Xtheirs|-Xunion`: resolve conflicts favouring our (or their or both) side of the lines
 
 ## Install Subtree2
 Add a working copy of this repository to your path.
