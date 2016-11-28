@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# This is a small wrapper around the git built-in script 'git-merge-one-file'.
+# This wrapper changes the way `git merge-file` is used: 1) it sets up proper
+# labels 2) custom arguments can be passed using the environment variable
+# MERGE_FILE_ARGS.
+
+GIT_EXEC_DIR=$(git --exec-path)
+REAL_GIT="$GIT_EXEC_DIR/git"
+
+function git() {
+    if [[ "$1" == "merge-file" ]]; then
+        shift
+        # don't quote MERGE_FILE_ARGS! It may contain multiple flags.
+        "$REAL_GIT" merge-file -L yours -L base -L theirs $MERGE_FILE_ARGS "$@"
+        return $?
+    else
+        "$REAL_GIT" "$@"
+        return $?
+    fi
+}
+
+. "$GIT_EXEC_DIR/git-merge-one-file"

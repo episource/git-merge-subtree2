@@ -1,0 +1,540 @@
+#!/bin/bash
+
+#
+# Constants
+GIT_REPO=$( git rev-parse --git-dir )
+STATE_FILE="$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
+TRUE=0
+FALSE=1
+NL=$'\n'
+CRITICAL_EXIT_CODE=1
+CAN_CONTINUE_EXIT_CODE=2
+
+
+#
+# Help
+
+function help() {
+    >&2 cat << EOF
+Include another branch or a sub-directory thereof as sub-directory of the
+current branch. By refering to remote branches, other repositories can be
+included as well. Subproject merges using --squash, so that the history does not
+become cluttered. Source branch and commit are remembered within the merge
+commit's message to simplify later updates. A subproject can also be merged back
+into the source branch.
+Note: Subproject uses \`git merge -s subtree2 --squash ...\` for merging.
+    
+git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--diff3] [--ours|--theirs|--union]
+git subproject push <my-prefix> [-m <message>] [--format=<format>]
+
+Init:
+    Copy a remote branch's content to a sub-directory <my-prefix> of the current
+    branch. The command will refuse to run if <my-prefix> already exists.
+    
+       my-prefix: mandatory - sub-directory in which their branch will be
+                  included
+    their-branch: mandatory - branch to be merged into a sub-directory of the
+                  current branch
+    their-prefix: optional - limit merging to this sub-directory of their
+                  branch
+         message: optional - custom commit message
+          format: optional - pass to \`git log\`'s format option when appending
+                  a description of the merged history to the commit message; use
+                  \`--format=\` to suppress the history
+
+Pull:
+    Update a subproject by merging changes from the upstream branch.
+    This command can also be used to change the name and/or prefix of the
+    upstream branch.
+    
+       my-prefix: mandatory - sub-directory containing an existing subproject
+    their-branch: optional - change the name of the upstream branch for now and
+                  the future; you might need to specify a different base for
+                  merging (see below)
+            base: optonal - overwrite the common-ancestor used for 3way merge;
+                  this might be usefull if the source branch's history has been
+                  rewritten; note - no history can be embedded into the commit
+                  message when this option is used
+    their-prefix: optional - change their prefix if the directory has been
+                  renamed since the last update
+     base-prefix: optional - overwrite the prefix applied to the common
+                  ancestor; this might be necessary when specifying a custom
+                  base
+         message: optional - custom commit message
+          format: optional - pass to \`git log\`'s format option when appending
+                  a description of the merged history to the commit message; use
+                  \`--format=\` to suppress the history
+           diff3: optional - show conflicts in "diff3" style, that is the common
+                  ancestor's version is included in confict markers
+            ours:
+          theirs:
+           union: optional - resolve conflicts favouring our (or their or both)
+                  side of the lines.
+           
+Push:
+    Push local changes to the upstream branch. Refused if the upstream branch
+    has changed since the last update.
+    
+       my-prefix: mandatory - sub-directory containing an existing subproject
+         message: optional - custom commit message
+          format: optional - pass to \`git log\`'s format option when appending
+                  a description of the merged history to the commit message; use
+                  \`--format=\` to suppress the history
+                  
+Continue:
+    Continue a pull/push operation after merge conflicts have been resolved.
+EOF
+
+    if [[ -n $1 ]]; then
+        exit $1
+    fi
+    
+    exit $CRITICAL_EXIT_CODE
+}
+
+
+#
+# Input Variables
+MINE=HEAD
+THEIRS=
+MY_PREFIX=
+THEIR_PREFIX=
+BASE_PREFIX=
+MESSAGE=
+HISTORY_FORMAT="medium"
+MERGE_FILE_CONFLICT_STYLE=""
+MERGE_FILE_MODE=""
+
+#
+# Context Variables
+PULL_MARKER="git-subproject-pull:"
+PUSH_MARKER="git-subproject-push:"
+LAST_PULL_MY_REV=
+LAST_PULL_MY_PREFIX=
+LAST_PULL_THEIR_REV=
+LAST_PULL_THEIR_PREFIX=
+LAST_PUSH_MY_REV=
+LAST_PUSH_MY_PREFIX=
+LAST_PUSH_THEIR_REV=
+LAST_PUSH_THEIR_PREFIX=
+MY_BRANCH=
+THEIR_BRANCH=
+
+
+#
+# Functions
+
+function commit() {
+    if ! git diff --no-ext-diff --quiet --exit-code --diff-filter=U; then
+        >&2 echo "ERROR: Committing is not possible because you have unmerged files."
+        >&2 echo "HINT: Fix them up in the work tree, and then use 'git add/rm <file>'"
+        >&2 echo "HINT: as appropriate to mark resolution. Finally continue with"
+        >&2 echo "HINT: \`git subproject continue\`."
+        
+        echo "STATE_REV=$(git rev-list HEAD -1)" > "$STATE_FILE"
+        
+        local STATE_VARS=( "BASE_PREFIX" "HISTORY_FORMAT" "LAST_PULL_MY_REV" "LAST_PULL_THEIR_PREFIX" "LAST_PULL_THEIR_REV" "LAST_PUSH_MY_REV" "LAST_PUSH_THEIR_PREFIX" "LAST_PUSH_THEIR_REV"  "MESSAGE" "MY_BRANCH" "MY_PREFIX" "THEIR_BRANCH" "THEIR_PREFIX")
+        for var in "${STATE_VARS[@]}"; do
+            declare -p $var >> "$STATE_FILE"
+        done
+        
+        exit $CAN_CONTINUE_EXIT_CODE
+    fi
+
+    git commit -m "$MESSAGE"
+}
+
+function fail-if-dirty() {
+    local TRUE=0
+    local FALSE=1
+    local IS_DIRTY=$FALSE
+    
+    if [[ -n "$(git status --porcelain)" ]]; then
+        >&2 echo "ERROR: Working directory contains untracked files."
+        IS_DIRTY=$TRUE
+    fi
+    
+    git diff --no-ext-diff --quiet --exit-code
+    if [[ $? -ne 0 ]]; then
+        >&2 echo "ERROR: Working directory has local changes."
+        IS_DIRTY=$TRUE
+    fi
+    
+    if [[ $IS_DIRTY -eq $TRUE ]]; then
+        >&2 echo "ERROR: Need to stage changes first."
+        exit $CRITICAL_EXIT_CODE
+    fi
+}
+
+function finalize-message() {
+    local MARKER="$1"
+    local MY_BRANCH="$2"
+    local MY_PREFIX="$3"
+    local THEIR_BRANCH="$4"
+    local THEIR_PREFIX="$5"
+    local LAST_KNOWN_THEIR_REV="$6"
+
+    local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
+    local MARKER_LINE="$MARKER -Xmy-prefix=\"$MY_PREFIX\" -Xtheir-branch=\"$THEIR_BRANCH\" -Xtheir-prefix=\"$THEIR_PREFIX\" -Xtheir-rev=\"$THEIR_REV\""
+    
+    if [[ -z "$MESSAGE" ]]; then
+        local THEIR_DESC=
+        [[ -n "$THEIR_PREFIX" ]] && THEIR_DESC="$THEIR_BRANCH:$THEIR_PREFIX" || THEIR_DESC="$THEIR_BRANCH:*"
+        
+        local MY_DESC=
+        [[ -n "$MY_PREFIX" ]] && MY_DESC="$MY_BRANCH:$MY_PREFIX" || MY_DESC="MY_BRANCH:*"
+    
+        MESSAGE="Merge '$THEIR_DESC' into '$MY_DESC'"
+    fi
+    
+    if [[ -n "$LAST_KNOWN_THEIR_REV" ]]; then
+        local LIMIT="^$LAST_KNOWN_THEIR_REV"
+        if [[ "$LAST_KNOWN_THEIR_REV" == "0" ]]; then
+            LIMIT=""
+        fi
+        
+        local HISTORY=$( git log --format="$HISTORY_FORMAT" $THEIR_BRANCH $LIMIT -- $THEIR_PREFIX | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
+        if [[ -n "$HISTORY" ]]; then
+            MESSAGE+="$NL$NL$HISTORY"
+        fi
+    fi
+    
+    MESSAGE+="$NL$NL$MARKER_LINE"
+}
+
+function get-subproject() {
+    if [[ ! -d "$MY_PREFIX" ]]; then
+        >&2 echo "ERROR: Prefix directory '$MY_PREFIX' not found."
+        return $CRITICAL_EXIT_CODE
+    fi
+
+    LAST_PULL_MY_REV=$( git rev-list -1 --first-parent "--grep=^$PULL_MARKER.*-Xmy-prefix=\"$MY_PREFIX\"" HEAD )
+    if [[ -z "$LAST_PULL_MY_REV" ]]; then
+        >&2 echo "ERROR: Subproject $MY_PREFIX not found."
+        return $CRITICAL_EXIT_CODE
+    fi
+    
+    local MY_CONFIG=$( git log -1 --format=%s%n%b $LAST_PULL_MY_REV | grep "^$PULL_MARKER" | sed -e "s/^$PULL_MARKER\s*//" )
+    for opt in $MY_CONFIG; do
+        local VAL=$( echo "${opt##*=}" | xargs )
+        case "$opt" in
+            -Xmy-prefix=*)
+                LAST_PULL_MY_PREFIX="$VAL"
+                ;;
+            -Xtheir-prefix=*)
+                set-if-zero "THEIR_PREFIX" "$VAL"
+                LAST_PULL_THEIR_PREFIX="$VAL"
+                ;;
+            -Xtheir-branch=*)
+                set-if-zero "THEIRS" "$VAL"
+                ;;
+            -Xtheir-rev=*)
+                LAST_PULL_THEIR_REV="$VAL"
+                ;;
+        esac
+    done
+    
+    resolve-branches
+    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent "--grep=^$PUSH_MARKER.*-Xtheir-branch=\"$MY_BRANCH\"" $THEIRS --not $BASE )
+    if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
+        local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
+        
+        for opt in $THEIR_CONFIG; do
+            local VAL=$( echo "${opt##*=}" | xargs )
+            case "$opt" in
+                -Xtheir-rev=*)
+                    LAST_PUSH_MY_REV="$VAL"
+                    ;;
+                -Xtheir-prefix=*)
+                    LAST_PUSH_MY_PREFIX="$VAL"
+                    ;;
+                -Xmy-prefix=*)
+                    LAST_PUSH_THEIR_PREFIX="$VAL"
+                    ;;
+                *);;
+            esac
+        done
+    fi
+}
+
+function merge() {
+    local MY_BRANCH="$1"
+    local MY_PREFIX="$2"
+    local THEIR_BRANCH="$3"
+    local THEIR_PREFIX="$4"
+    local BASE_REV="$5"
+    local BASE_PREFIX="$6"
+    
+    # do the merge
+    git merge --allow-unrelated-histories --squash -s subtree2 $MERGE_FILE_MODE $MERGE_FILE_CONFLICT_STYLE -Xmy-prefix="$MY_PREFIX" -Xbase="$BASE_REV" -Xbase-prefix="$BASE_PREFIX" -Xtheir-prefix="$THEIR_PREFIX" "$THEIR_BRANCH"
+    if [[ -z "$(git status --porcelain)" ]]; then
+        >&2 echo "ERROR: No changes to pull/push."
+        return $CRITICAL_EXIT_CODE
+    fi
+}
+
+function merge-and-commit() {
+    local MARKER="$1"
+    local MY_BRANCH="$2"
+    local MY_PREFIX="$3"
+    local THEIR_BRANCH="$4"
+    local THEIR_PREFIX="$5"
+    local BASE_REV="$6"
+    local BASE_PREFIX="$7"
+    local LAST_KNOWN_THEIR_REV="$8"
+    
+    finalize-message "$MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+    merge "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX" || return $?
+    commit
+}
+
+function normalize-prefix() {
+    echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
+}
+
+function read-arguments() {
+    local COMMON_ARGS=( "-m" "--format" )
+    local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" )
+    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--diff3" "--ours" "--theirs" "--union")
+    local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
+    local CONTINUE_ARGS=( )
+    declare -n ALLOWED_ARGS
+
+    function ensure-allowed() {
+        for a in "${ALLOWED_ARGS[@]}"; do
+            if [[ "$1" == "$a"* ]]; then
+                return 0
+            fi
+        done
+        
+        help
+    }
+    
+    if [[ "$@" == *help* ]]; then 
+        help 0
+    fi
+
+    # check mode
+    MODE="$1"
+    case "$MODE" in
+        init|pull|push)
+            [[ $# -lt 2 ]] && help
+            MY_PREFIX=$(normalize-prefix "$2")
+            shift 2
+            ;;
+        continue)
+            [[ $# -gt 1 ]] && help
+            shift
+            ;;
+        *)
+            help
+            ;;
+    esac
+    
+    # select argument set
+    ALLOWED_ARGS="${MODE^^}_ARGS"
+
+    # treat THEIRS special if in mode `init`
+    if [[ "$MODE" == "init" && "$0" != --* ]]; then
+        THEIRS="$1"
+        shift
+    fi
+
+    # parse args
+    while [[ $# -gt 0 ]]
+    do
+        ensure-allowed $1
+        local VAL="${1##*=}"
+        
+        case "$1" in
+            --their-branch=*)
+                THEIRS="$VAL"
+                ;;
+            --their-prefix=*)
+                THEIR_PREFIX=$(normalize-prefix "$VAL")
+                ;;
+            --base=*)
+                BASE="$VAL"
+                ;;
+            --base-prefix=*)
+                BASE_PREFIX=$(normalize-prefix "$VAL")
+                ;;
+            -m)
+                MESSAGE=$2
+                shift
+                ;;
+            --format=*)
+                HISTORY_FORMAT="$VAL"
+                ;;
+            --diff3)
+                MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
+                ;;
+            --ours)
+                MERGE_FILE_MODE="-Xours"
+                ;;
+            --theirs)
+                MERGE_FILE_MODE="-Xtheirs"
+                ;;
+            --union)
+                MERGE_FILE_MODE="-Xunion"
+                ;;
+            *)
+                help
+                ;;
+        esac
+        shift # past argument or value
+    done
+
+    [[ "$MODE" == "continue" || -n "$MY_PREFIX" ]] || help
+}
+
+function resolve-branches() {
+    MY_BRANCH=$( git symbolic-ref --short HEAD )
+    THEIR_BRANCH=$( git branch -a -q --list $THEIRS | xargs )
+}
+
+function set-if-zero() {
+    declare -n VAR=$1
+    if [[ -z "$VAR" ]]; then
+        VAR=$2
+    fi
+}
+
+
+#
+# Mode implementation
+
+function do-init() {
+    if [[ -e "$MY_PREFIX" ]]; then
+        >&2 echo "ERROR: Prefix directory '$MY_PREFIX' already exists."
+        return $CRITICAL_EXIT_CODE
+    fi
+
+    resolve-branches
+    local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
+    local LAST_KNOWN_THEIR_REV="0"
+    
+    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "HEAD" "$MY_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+}
+
+function finish-init() { 
+    :
+}
+
+function do-pull() {
+    get-subproject || return $?
+       
+    # Determine base (first applicable option is used)
+    # 1. explicit BASE given by user
+    # 2. LAST_PUSH_MY_REV is newer than LAST_PULL_MY_REV:
+    #    use LAST_PUSH_MY_REV
+    # 3. use LAST_PULL_THEIR_REV
+    # Determine base prefix (first applicable option is used)
+    # 1. explicit BASE_PREFIX given by user
+    # 2. LAST_PUSH_MY_REV is newer than LAST_PULL_MY_REV: use LAST_PUSH_THEIR_PREFIX
+    # 3. LAST_PULL_THEIR_PREFIX
+    local PULL_BASE="$BASE"
+    local PULL_BASE_PREFIX="$BASE_PREFIX"
+    local LAST_KNOWN_THEIR_REV=
+    if [[ -n $LAST_PUSH_MY_REV && ( $LAST_PUSH_MY_REV == $LAST_PULL_MY_REV || -n $( git rev-list --first-parent $LAST_PULL_MY_REV..$LAST_PUSH_MY_REV ) ) ]]; then
+        set-if-zero "PULL_BASE" "$LAST_PUSH_MY_REV"
+        set-if-zero "PULL_BASE_PREFIX" "$LAST_PUSH_MY_PREFIX"
+        LAST_KNOWN_THEIR_REV="$LAST_PUSH_THEIR_REV"
+    else
+        set-if-zero "PULL_BASE" "$LAST_PULL_THEIR_REV"
+        set-if-zero "PULL_BASE_PREFIX" "$LAST_PULL_THEIR_PREFIX"
+        LAST_KNOWN_THEIR_REV="$LAST_PULL_THEIR_REV"
+    fi
+    
+    if [[ -n "$BASE" ]]; then
+        LAST_KNOWN_THEIR_REV=
+    fi
+    
+    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$PULL_BASE" "$PULL_BASE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+}
+
+function finish-pull() { 
+    :
+}
+
+function do-push() {
+    get-subproject  || return $?
+    
+    local PUSH_BASE=
+    local PUSH_BASE_PREFIX=
+    local LAST_KNOWN_THEIR_REV=
+    LAST_KNOWN_MY_REV="$LAST_PUSH_MY_REV"
+    if [[ -n $LAST_PUSH_MY_REV && ( $LAST_PUSH_MY_REV == $LAST_PULL_MY_REV || -n $( git rev-list --first-parent $LAST_PULL_MY_REV..$LAST_PUSH_MY_REV ) ) ]]; then
+        # Last PUSH is newer than last PULL
+        #
+        PUSH_BASE="$LAST_PUSH_MY_REV"
+        PUSH_BASE_PREFIX="$LAST_PUSH_MY_PREFIX"
+        LAST_KNOWN_THEIR_REV="$LAST_PUSH_THEIR_REV"
+    else
+        # LAST PULL is newest
+        #
+        PUSH_BASE="$LAST_PULL_THEIR_REV"
+        PUSH_BASE_PREFIX="$LAST_PULL_THEIR_PREFIX"
+        LAST_KNOWN_THEIR_REV="$LAST_PULL_THEIR_REV"
+    fi
+    
+    # refuse to push if their side has unknown changes
+    if ! git diff --no-ext-diff --quiet --exit-code $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX"; then
+        >&2 echo "ERROR: Their branch '$THEIR_BRANCH' has changes that have not been pulled."
+        >&2 echo "ERROR: You need to pull these changes first!"
+        exit $CRITICAL_EXIT_CODE
+    fi
+    
+    if [[ -z "$LAST_KNOWN_MY_REV" ]]; then 
+        LAST_KNOWN_MY_REV="0"
+    fi
+    
+    git checkout -q "$THEIR_BRANCH"
+    merge-and-commit "$PUSH_MARKER" "$THEIR_BRANCH" "$THEIR_PREFIX" "$MY_BRANCH" "$MY_PREFIX" "$PUSH_BASE" "$PUSH_BASE_PREFIX" "$LAST_KNOWN_MY_REV" || return $?
+}
+
+function finish-push() {
+    git checkout -q "$MY_BRANCH"
+}
+
+function do-continue() {
+    if [[ ! -f "$STATE_FILE" ]]; then
+        >&2 echo "ERROR: Nothing to continue!"
+        return $CRITICAL_EXIT_CODE
+    fi
+    
+    . "$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
+    if [[ "$STATE_REV" != $(git rev-list HEAD -1) ]]; then
+        >&2 echo "ERROR: Nothing to continue!"
+        return $CRITICAL_EXIT_CODE
+    fi
+    
+    commit
+    
+    rm "$STATE_FILE"
+}
+
+function finish-continue() { 
+    :
+}
+
+
+#
+# Main
+
+# Go to root directory of the working tree
+cd $(git rev-parse --show-toplevel)
+
+read-arguments "$@"
+if [[ "$MODE" != "continue" ]]; then
+    fail-if-dirty
+fi
+
+eval "do-$MODE"
+DO_STATUS=$?
+
+eval "finish-$MODE $DO_STATUS"
+FINISH_STATUS=$?
+
+[[ $DO_STATUS -ne 0 ]] && exit $DO_STATUS || exit $FINISH_STATUS

@@ -1,0 +1,186 @@
+#!/bin/bash
+
+# Similiar to the built-in recursive merge strategy's subtree option, but has
+# support for merging only a specific (sub-)folder of the source branch. The
+# recursive algorithm isn't used by subtree2, however. Instead the more simple
+# resolve algorithm is used. There's no difference between both if there's only
+# one common ancestor.
+
+# Arguments:
+# [--their-prefix=<prefix>] [--my-prefix=<prefix>] [--base-prefix=<prefix>] [--base=<common-ancestor>] [<common-ancestor>] -- <my-commit> <their-commit>
+#    my-prefix: Merges into a specific folder of the target branch (behaves the
+#               mostly the same as the built-in recursive strategy's 
+#               "-Xsubtree=<prefix>" option)
+# their-prefix: Limits subtree merging to a specific folder of the source branch
+#  base-prefix: The prefix applicable to <common-ancestor>. Usefull if the
+#               prefix has changed from <common-ancestor> to <their-commit> 
+#         base: The common base (<common-ancestor>) of <my-commit> and
+#               <their-commit>.
+
+
+#
+# Read arguments
+BASE=""
+MINE=""
+THEIRS=""
+MY_PREFIX=""
+THEIR_PREFIX=""
+BASE_PREFIX=""
+MERGE_FILE_CONFLICT_STYLE=""
+MERGE_FILE_MODE=""
+
+function normalize-prefix() {
+    echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
+}
+
+function read-arguments() {
+    while [[ $# -gt 0 ]]
+    do
+        local VAL="${1##*=}"
+
+        case "$1" in
+            --their-prefix=*)
+                THEIR_PREFIX=$(normalize-prefix "$VAL")
+                ;;
+            --my-prefix=*)
+                MY_PREFIX=$(normalize-prefix "$VAL")
+                ;;
+            --base-prefix=*)
+                BASE_PREFIX=$(normalize-prefix "$VAL")
+                ;;
+            --base=*)
+                BASE="$VAL"
+                ;;
+            --diff3)
+                MERGE_FILE_CONFLICT_STYLE="--diff3"
+                ;;
+            --no-diff3)
+                MERGE_FILE_CONFLICT_STYLE=""
+                ;;
+            --ours)
+                MERGE_FILE_MODE="--ours"
+                ;;
+            --theirs)
+                MERGE_FILE_MODE="--theirs"
+                ;;
+            --union)
+                MERGE_FILE_MODE="--union"
+                ;;                
+            --)
+                if [[ $# -ne 3 ]]; then
+                    >&2 echo "Exactly to remotes needed, but got $#."
+                    exit 2
+                fi
+                
+                MINE="$2"
+                THEIRS="$3"
+                shift 2
+                ;;
+                *)
+                if [[ -n "$BASE" ]]; then
+                    >&2 echo "A custom base has already been specified. Ignoring base provided by `git merge`."
+                else
+                    BASE="$1"
+                fi
+                ;;
+        esac
+        shift # past argument or value
+    done
+
+    if [[ -z $BASE_PREFIX ]]; then
+        BASE_PREFIX=$THEIR_PREFIX
+    fi
+}
+read-arguments "$@"
+
+#
+# Prepare trees for merging
+
+# shift a tree referenced by a variable, whose name is passed as first argument
+# arguments: <tree> <shift>
+#             <tree>: name of tree variable - e.g. "BASE" or "THEIRS"
+#     <their-prefix>: shift tree, such that only files found below
+#                     <their-prefix> are considered
+function shift-tree() {
+    declare -n TREEISH=$1
+    local PREFIX=$2
+    
+    # if specified, extract the tree object corresponding to $PREFIX
+    if [[ -n $THEIR_PREFIX ]]; then
+        LS_REV=( $(git ls-tree -rd "$TREEISH" | grep "\s$PREFIX$" --max-count 1) )
+        
+        if [[ -z ${LS_REV[@]} ]]; then
+            >&2 echo "'$TREEISH' does not include a folder '$PREFIX'"
+            exit 2
+        fi
+        
+        TREEISH=${LS_REV[2]}
+    fi
+    
+    # use the index to prepare their tree
+    if [[ -z $MY_PREFIX ]]; then
+        # the merge is not limited to a sub directory ($MY_PREFIX) of $MINE,
+        # hence there are no files outside $MY_PREFIX to preserve
+        # => prepare their tree starting with an empty index
+        git read-tree --empty
+        git read-tree $TREEISH
+    else 
+        # the merge is limited to a sub directory ($MY_PREFIX) of $MINE,
+        # hence there are files outside $MY_PREFIX to preserve
+        # => initialize their tree using $MINE and replace everything below
+        #    $MY_PREFIX
+        git reset --mixed $MINE
+        git rm -q --cached "$MY_PREFIX/*" &> /dev/null
+        git read-tree --prefix="$MY_PREFIX" $TREEISH
+    fi
+    TREEISH=$(git write-tree)
+}
+
+# Check whether "$BASE" is within the list of "first parents" of THEIRS
+# Important: THEIRS needs to be a commit reference and not a shifted TREEISH
+# => `is-base-theirs` can't be used after `shift-tree "THEIRS"`
+function is-base-theirs() {
+    TRUE=0
+    FALSE=1
+    
+    BASE_DATE=$(git show -s $BASE --format=%ci)
+    git rev-list --since "$BASE_DATE" --first-parent "$THEIRS" | grep -q "$BASE"
+    return $?
+}
+
+
+if [[ -z $BASE ]]; then
+    # 2-way merge: Use mine as base
+    BASE=$MINE
+elif is-base-theirs; then
+    # base tree needs to be shifted, because BASE is within the list of 
+    # "first parents" of THEIRS and hence paths have not already been adjusted 
+    shift-tree "BASE" "$BASE_PREFIX"
+fi
+
+shift-tree "THEIRS" "$THEIR_PREFIX"
+
+
+#
+# Merge
+
+# Update index to match working directory, then merge trees
+git reset --mixed 
+git read-tree -m -u --aggressive $BASE $MINE $THEIRS || exit 2
+
+# Read-tree does a simple merge, that might leave unresolved files behind
+# Using 'git write-tree' it is easy to test for unresolved files.
+echo "Trying simple merge."
+if result_tree=$(git write-tree 2>/dev/null); then
+    exit 0
+else 
+    # see https://github.com/git/git/blob/master/git-merge-resolve.sh
+    echo "Simple merge failed, trying Automatic merge."
+    export MERGE_FILE_ARGS="$MERGE_FILE_CONFLICT_STYLE $MERGE_FILE_MODE"
+	if git-merge-index -o git-merge-one-file2 -a
+	then
+		exit 0
+	else
+		exit 1
+	fi
+fi
