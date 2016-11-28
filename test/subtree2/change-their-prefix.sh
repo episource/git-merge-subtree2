@@ -1,6 +1,6 @@
 #!/bin/bash
-# This test merges the sub-directory "subtree" of branch 'source' 
-# (source:subtree) into the sub-directory "my-subtree" of branch target
+# This test merges the subdirectory "subtree" of branch 'source' 
+# (source:subtree) into the subdirectory "my-subtree" of branch target
 # (target:my-subtree). Later on source:subtree is renamed to source:subtree2 and
 # a resolvable conflict is provoked by prepending a line to source's version and
 # appending another line to target's version. A second merge should succeed when
@@ -30,7 +30,7 @@ function the-test() {
     git add -A
     git commit -m "target: initial commit"
 
-    # Merge source:subtree to sub-directory "my-subtree"
+    # Merge source:subtree to subdirectory "my-subtree"
     git merge --allow-unrelated-histories --no-edit -s subtree2 -Xtheir-prefix=subtree -Xmy-prefix=my-subtree source
 
     # Update and rename source 

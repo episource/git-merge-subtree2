@@ -1,5 +1,5 @@
 #!/bin/bash
-# This test adds the sub-directory "subtree" of branch 'source' 
+# This test adds the subdirectory "subtree" of branch 'source' 
 # (source:subtree) as subproject "my-subproject" of branch target 
 # (target:my-subproject). Later on a resolvable conflict is provoked by
 # prepending a line to source's version and appending another line to target's

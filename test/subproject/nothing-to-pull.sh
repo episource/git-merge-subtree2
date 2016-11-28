@@ -1,5 +1,5 @@
 #!/bin/bash
-# This test adds the sub-directory "subtree" of branch 'source' 
+# This test adds the subdirectory "subtree" of branch 'source' 
 # (source:subtree) as subproject "my-subproject" of branch target 
 # (target:my-subproject). Later on source is changed, but the changes are undone
 # with the next commit. The next pull operation should be refused with a message

@@ -1,6 +1,6 @@
 #!/bin/bash
-# This test merges the sub-directory "subtree" of repository/branch repo1/master
-# into the sub-directory "my-repo1-subtree" of repository/branch repo2/master.
+# This test merges the subdirectory "subtree" of repository/branch repo1/master
+# into the subdirectory "my-repo1-subtree" of repository/branch repo2/master.
 # Later on a conflict is provoked by prepending a line to repo1's version and
 # appending a line to repo2's version. A second merge should succeed with the
 # conflict being resolved automatically.
@@ -23,7 +23,7 @@ function the-test() {
     git add -A
     git commit -m "repo2: initial commit"
 
-    # Merge repo1/subtree to sub-directory "my-repo1-subtree"
+    # Merge repo1/subtree to subdirectory "my-repo1-subtree"
     git remote add repo1 ../repo1
     git fetch repo1
     git merge --allow-unrelated-histories --no-edit -s subtree2 -Xtheir-prefix=subtree -Xmy-prefix=my-repo1-subtree repo1/master

@@ -16,7 +16,7 @@ CAN_CONTINUE_EXIT_CODE=2
 
 function help() {
     >&2 cat << EOF
-Include another branch or a sub-directory thereof as sub-directory of the
+Include another branch or a subdirectory thereof as subdirectory of the
 current branch. By refering to remote branches, other repositories can be
 included as well. Subproject merges using --squash, so that the history does not
 become cluttered. Source branch and commit are remembered within the merge
@@ -29,14 +29,14 @@ git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-pref
 git subproject push <my-prefix> [-m <message>] [--format=<format>]
 
 Init:
-    Copy a remote branch's content to a sub-directory <my-prefix> of the current
+    Copy a remote branch's content to a subdirectory <my-prefix> of the current
     branch. The command will refuse to run if <my-prefix> already exists.
     
-       my-prefix: mandatory - sub-directory in which their branch will be
+       my-prefix: mandatory - subdirectory in which their branch will be
                   included
-    their-branch: mandatory - branch to be merged into a sub-directory of the
+    their-branch: mandatory - branch to be merged into a subdirectory of the
                   current branch
-    their-prefix: optional - limit merging to this sub-directory of their
+    their-prefix: optional - limit merging to this subdirectory of their
                   branch
          message: optional - custom commit message
           format: optional - pass to \`git log\`'s format option when appending
@@ -48,7 +48,7 @@ Pull:
     This command can also be used to change the name and/or prefix of the
     upstream branch.
     
-       my-prefix: mandatory - sub-directory containing an existing subproject
+       my-prefix: mandatory - subdirectory containing an existing subproject
     their-branch: optional - change the name of the upstream branch for now and
                   the future; you might need to specify a different base for
                   merging (see below)
@@ -76,7 +76,7 @@ Push:
     Push local changes to the upstream branch. Refused if the upstream branch
     has changed since the last update.
     
-       my-prefix: mandatory - sub-directory containing an existing subproject
+       my-prefix: mandatory - subdirectory containing an existing subproject
          message: optional - custom commit message
           format: optional - pass to \`git log\`'s format option when appending
                   a description of the merged history to the commit message; use
