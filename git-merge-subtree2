@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$( dirname $( readlink -e $0 ) )/lib/lib.sh"
 
 # Similiar to the built-in recursive merge strategy's subtree option, but has
 # support for merging only a specific (sub-)folder of the source branch. The
@@ -28,10 +29,6 @@ THEIR_PREFIX=""
 BASE_PREFIX=""
 MERGE_FILE_CONFLICT_STYLE=""
 MERGE_FILE_MODE=""
-
-function normalize-prefix() {
-    echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
-}
 
 function read-arguments() {
     while [[ $# -gt 0 ]]
@@ -95,46 +92,6 @@ read-arguments "$@"
 
 #
 # Prepare trees for merging
-
-# shift a tree referenced by a variable, whose name is passed as first argument
-# arguments: <tree> <shift>
-#             <tree>: name of tree variable - e.g. "BASE" or "THEIRS"
-#     <their-prefix>: shift tree, such that only files found below
-#                     <their-prefix> are considered
-function shift-tree() {
-    declare -n TREEISH=$1
-    local PREFIX=$2
-    
-    # if specified, extract the tree object corresponding to $PREFIX
-    if [[ -n $THEIR_PREFIX ]]; then
-        LS_REV=( $(git ls-tree -rd "$TREEISH" | grep "\s$PREFIX$" --max-count 1) )
-        
-        if [[ -z ${LS_REV[@]} ]]; then
-            >&2 echo "'$TREEISH' does not include a folder '$PREFIX'"
-            exit 2
-        fi
-        
-        TREEISH=${LS_REV[2]}
-    fi
-    
-    # use the index to prepare their tree
-    if [[ -z $MY_PREFIX ]]; then
-        # the merge is not limited to a sub directory ($MY_PREFIX) of $MINE,
-        # hence there are no files outside $MY_PREFIX to preserve
-        # => prepare their tree starting with an empty index
-        git read-tree --empty
-        git read-tree $TREEISH
-    else 
-        # the merge is limited to a sub directory ($MY_PREFIX) of $MINE,
-        # hence there are files outside $MY_PREFIX to preserve
-        # => initialize their tree using $MINE and replace everything below
-        #    $MY_PREFIX
-        git reset --mixed $MINE
-        git rm -q --cached "$MY_PREFIX/*" &> /dev/null
-        git read-tree --prefix="$MY_PREFIX" $TREEISH
-    fi
-    TREEISH=$(git write-tree)
-}
 
 # Check whether "$BASE" is within the list of "first parents" of THEIRS
 # Important: THEIRS needs to be a commit reference and not a shifted TREEISH

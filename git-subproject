@@ -1,17 +1,35 @@
 #!/bin/bash
+source "$( dirname $( readlink -e $0 ) )/lib/lib.sh"
+
 
 #
 # Constants
-GIT_REPO=$( git rev-parse --git-dir )
 MY_BRANCH=$( git symbolic-ref --short HEAD )
+STATE_FILE="$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
 PULL_MARKER="git-subproject-pull:"
 PUSH_MARKER="git-subproject-push:"
-STATE_FILE="$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
-TRUE=0
-FALSE=1
-NL=$'\n'
-CRITICAL_EXIT_CODE=1
-CAN_CONTINUE_EXIT_CODE=2
+
+#
+# Input Variables
+THEIR_BRANCH=
+MY_PREFIX=
+THEIR_PREFIX=
+BASE_PREFIX=
+MESSAGE=
+HISTORY_FORMAT="medium"
+MERGE_FILE_CONFLICT_STYLE=""
+MERGE_FILE_MODE=""
+
+#
+# Context Variables
+LAST_PULL_MY_REV=
+LAST_PULL_MY_PREFIX=
+LAST_PULL_THEIR_REV=
+LAST_PULL_THEIR_PREFIX=
+LAST_PUSH_MY_REV=
+LAST_PUSH_MY_PREFIX=
+LAST_PUSH_THEIR_REV=
+LAST_PUSH_THEIR_PREFIX=
 
 
 #
@@ -98,31 +116,11 @@ EOF
 
 
 #
-# Input Variables
-THEIR_BRANCH=
-MY_PREFIX=
-THEIR_PREFIX=
-BASE_PREFIX=
-MESSAGE=
-HISTORY_FORMAT="medium"
-MERGE_FILE_CONFLICT_STYLE=""
-MERGE_FILE_MODE=""
-
-#
-# Context Variables
-LAST_PULL_MY_REV=
-LAST_PULL_MY_PREFIX=
-LAST_PULL_THEIR_REV=
-LAST_PULL_THEIR_PREFIX=
-LAST_PUSH_MY_REV=
-LAST_PUSH_MY_PREFIX=
-LAST_PUSH_THEIR_REV=
-LAST_PUSH_THEIR_PREFIX=
-
-
-#
 # Functions
 
+# Commit the merged working directory or save the current script state to be
+# picked up by `git subproject continue` and abort with exit code
+# $CAN_CONTINUE_EXIT_CODE.
 function commit() {
     if ! git diff --no-ext-diff --quiet --exit-code --diff-filter=U; then
         >&2 echo "ERROR: Committing is not possible because you have unmerged files."
@@ -143,28 +141,19 @@ function commit() {
     git commit -m "$MESSAGE"
 }
 
-function fail-if-dirty() {
-    local TRUE=0
-    local FALSE=1
-    local IS_DIRTY=$FALSE
-    
-    if [[ -n "$(git status --porcelain)" ]]; then
-        >&2 echo "ERROR: Working directory contains untracked files."
-        IS_DIRTY=$TRUE
-    fi
-    
-    git diff --no-ext-diff --quiet --exit-code
-    if [[ $? -ne 0 ]]; then
-        >&2 echo "ERROR: Working directory has local changes."
-        IS_DIRTY=$TRUE
-    fi
-    
-    if [[ $IS_DIRTY -eq $TRUE ]]; then
-        >&2 echo "ERROR: Need to stage changes first."
-        exit $CRITICAL_EXIT_CODE
-    fi
-}
-
+# Add history and subproject markers to the commit message $MESSAGE. A default
+# message is created when $MESSAGE is empty.
+# Arguments: <marker> <my_branch> <my_prefix> <their_prefix> <last_known_their_rev>
+#          <marker>: indicates that the commit is a subproject commit (example:
+#                    git-subproject-pull)
+#       <my_branch>: target branch
+#       <my_prefix>: target branch prefix (subdirectory)
+#    <their_branch>: source branch
+#    <their_prefix>: source branch prefix (subdirectory)
+#    <last_known_their_rev>: log message from this revision up to the tip of
+#                    their_branch are included in the commit message; if
+#                    unspecified the full history is considered; the history
+#                    format is taken from $HISTORY_FORMAT
 function finalize-message() {
     local MARKER="$1"
     local MY_BRANCH="$2"
@@ -201,7 +190,9 @@ function finalize-message() {
     MESSAGE+="$NL$NL$MARKER_LINE"
 }
 
-function get-subproject() {
+# Parse history to figure out context variables: subproject commits are marked
+# with either $PUSH_MARKERs or $PULL_MARKERs
+function get-context() {
     if [[ ! -d "$MY_PREFIX" ]]; then
         >&2 echo "ERROR: Prefix directory '$MY_PREFIX' not found."
         return $CRITICAL_EXIT_CODE
@@ -256,6 +247,7 @@ function get-subproject() {
     fi
 }
 
+# Merge using subtree2 strategy
 function merge() {
     local MY_BRANCH="$1"
     local MY_PREFIX="$2"
@@ -287,17 +279,14 @@ function merge-and-commit() {
     commit
 }
 
-function normalize-prefix() {
-    echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
-}
-
+# Read command line arguments
 function read-arguments() {
     local COMMON_ARGS=( "-m" "--message" "--format" )
     local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" )
     local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--diff3" "--ours" "--theirs" "--union")
     local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
     local CONTINUE_ARGS=( )
-    declare -n ALLOWED_ARGS
+    local -n ALLOWED_ARGS
 
     function ensure-allowed() {
         for a in "${ALLOWED_ARGS[@]}"; do
@@ -333,7 +322,7 @@ function read-arguments() {
     # select argument set
     ALLOWED_ARGS="${MODE^^}_ARGS"
 
-    # treat THEIRS special if in mode `init`
+    # treat THEIR_BRANCH special if in mode `init`
     if [[ "$MODE" == "init" && "$1" != --* ]]; then
         THEIR_BRANCH="$1"
         shift
@@ -387,46 +376,6 @@ function read-arguments() {
     [[ "$MODE" == "continue" || -n "$MY_PREFIX" ]] || help
 }
 
-# Verify a branch (or reference) name and expand it to an unambigious
-# representation: 1) if the branch starts with "heads/" and "refs/$BRANCH"
-# exists, "heads/" is stripped from the beginning of the branch name and the
-# result is returned 2) if "refs/heads/$BRANCH" exist, "$BRANCH" is returned
-# unchanged 3) if "refs/remotes/$BRANCH" exists, "remotes/$BRANCH" is returned
-# 3) if "refs/$BRANCH" exists, "$BRANCH" is returned unchanged
-# Arguments: <branch_var>
-#    <branch_var>: variable storing the branch name to be verified and expanded
-function resolve-branch() {
-    declare -n BRANCH=$1
-    
-    # The result corresponding to the first matching candidate is returned
-    local CANDIDATES=("heads/$BRANCH" "remotes/$BRANCH" "$BRANCH")
-    local RESULTS=(   "$BRANCH"       "remotes/$BRANCH" "$BRANCH")
-    if [[ "$BRANCH" == heads/* ]]; then
-        CANDIDATES=( "$BRANCH"           "${CANDIDATES[@]}" )
-        RESULTS=(    "${BRANCH##heads/}" "${RESULTS[@]}" )
-    fi
-    
-    for ref in "${CANDIDATES[@]}"; do
-        if git show-ref -q --verify "refs/$ref"; then
-            BRANCH="${RESULTS[0]}"
-            return 0
-        fi
-        
-        CANDIDATES=( "${CANDIDATES[@]:1}" )
-        RESULTS=( "${RESULTS[@]:1}" )
-    done
-    
-    >&2 echo "ERROR: Branch not found: $BRANCH"
-    return $CRITICAL_EXIT_CODE
-}
-
-function set-if-zero() {
-    declare -n VAR=$1
-    if [[ -z "$VAR" ]]; then
-        VAR=$2
-    fi
-}
-
 
 #
 # Mode implementation
@@ -449,7 +398,7 @@ function finish-init() {
 }
 
 function do-pull() {
-    get-subproject || return $?
+    get-context || return $?
        
     # Determine base (first applicable option is used)
     # 1. explicit BASE given by user
@@ -485,7 +434,7 @@ function finish-pull() {
 }
 
 function do-push() {
-    get-subproject  || return $?
+    get-context  || return $?
     
     local PUSH_BASE=
     local PUSH_BASE_PREFIX=
