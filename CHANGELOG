@@ -1,0 +1,7 @@
+# v0.1.1
+- Multiple subprojects sharing the same combination of source/target-branch are
+  now distinguished properly. Previously subprojects were mixed when push
+  operations were involved.
+  
+# v0.1.0
+- Initial version
