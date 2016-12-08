@@ -1,3 +1,9 @@
+# v0.1.3 (SNAPSHOT)
+- Git-subproject no longer invokes `git merge --squash -s subtree2`, but uses
+  the same shared merge implementation as the subtree2 merge strategy (this is
+  an internal code change, that might improve performance, but does not affect
+  externally visible behavior).
+
 # v0.1.2 (2016-12-18)
 - Accept qualified (remote) branch names (that is 'remotes/origin/branch'
   instead of 'origin/branch').
