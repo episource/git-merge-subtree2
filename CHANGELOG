@@ -1,4 +1,6 @@
 # v0.1.2 (SNAPSHOT)
+- Accept qualified (remote) branch names (that is 'remotes/origin/branch'
+  instead of 'origin/branch').
 - v0.1.1 introduced a bug, that resulted in push-merges not being considered
   when calculating the merge base (more precise: they have been considered only
   if "my-prefix" was equal to "their-prefix"). This issue is now resolved.

@@ -3,6 +3,9 @@
 #
 # Constants
 GIT_REPO=$( git rev-parse --git-dir )
+MY_BRANCH=$( git symbolic-ref --short HEAD )
+PULL_MARKER="git-subproject-pull:"
+PUSH_MARKER="git-subproject-push:"
 STATE_FILE="$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
 TRUE=0
 FALSE=1
@@ -96,8 +99,7 @@ EOF
 
 #
 # Input Variables
-MINE=HEAD
-THEIRS=
+THEIR_BRANCH=
 MY_PREFIX=
 THEIR_PREFIX=
 BASE_PREFIX=
@@ -108,8 +110,6 @@ MERGE_FILE_MODE=""
 
 #
 # Context Variables
-PULL_MARKER="git-subproject-pull:"
-PUSH_MARKER="git-subproject-push:"
 LAST_PULL_MY_REV=
 LAST_PULL_MY_PREFIX=
 LAST_PULL_THEIR_REV=
@@ -118,8 +118,6 @@ LAST_PUSH_MY_REV=
 LAST_PUSH_MY_PREFIX=
 LAST_PUSH_THEIR_REV=
 LAST_PUSH_THEIR_PREFIX=
-MY_BRANCH=
-THEIR_BRANCH=
 
 
 #
@@ -227,7 +225,7 @@ function get-subproject() {
                 LAST_PULL_THEIR_PREFIX="$VAL"
                 ;;
             -Xtheir-branch=*)
-                set-if-zero "THEIRS" "$VAL"
+                set-if-zero "THEIR_BRANCH" "$VAL"
                 ;;
             -Xtheir-rev=*)
                 LAST_PULL_THEIR_REV="$VAL"
@@ -235,8 +233,8 @@ function get-subproject() {
         esac
     done
     
-    resolve-branches
-    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $THEIRS --not $BASE )
+    resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
+    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $THEIR_BRANCH --not $BASE )
     if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
         local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
         
@@ -337,7 +335,7 @@ function read-arguments() {
 
     # treat THEIRS special if in mode `init`
     if [[ "$MODE" == "init" && "$1" != --* ]]; then
-        THEIRS="$1"
+        THEIR_BRANCH="$1"
         shift
     fi
 
@@ -349,7 +347,7 @@ function read-arguments() {
         
         case "$1" in
             --their-branch=*)
-                THEIRS="$VAL"
+                THEIR_BRANCH="$VAL"
                 ;;
             --their-prefix=*)
                 THEIR_PREFIX=$(normalize-prefix "$VAL")
@@ -389,9 +387,38 @@ function read-arguments() {
     [[ "$MODE" == "continue" || -n "$MY_PREFIX" ]] || help
 }
 
-function resolve-branches() {
-    MY_BRANCH=$( git symbolic-ref --short HEAD )
-    THEIR_BRANCH=$( git branch -a -q --list $THEIRS | xargs )
+# Verify a branch (or reference) name and expand it to an unambigious
+# representation: 1) if the branch starts with "heads/" and "refs/$BRANCH"
+# exists, "heads/" is stripped from the beginning of the branch name and the
+# result is returned 2) if "refs/heads/$BRANCH" exist, "$BRANCH" is returned
+# unchanged 3) if "refs/remotes/$BRANCH" exists, "remotes/$BRANCH" is returned
+# 3) if "refs/$BRANCH" exists, "$BRANCH" is returned unchanged
+# Arguments: <branch_var>
+#    <branch_var>: variable storing the branch name to be verified and expanded
+function resolve-branch() {
+set -x
+    declare -n BRANCH=$1
+    
+    # The result corresponding to the first matching candidate is returned
+    local CANDIDATES=("heads/$BRANCH" "remotes/$BRANCH" "$BRANCH")
+    local RESULTS=(   "$BRANCH"       "remotes/$BRANCH" "$BRANCH")
+    if [[ "$BRANCH" == heads/* ]]; then
+        CANDIDATES=( "$BRANCH"           "${CANDIDATES[@]}" )
+        RESULTS=(    "${BRANCH##heads/}" "${RESULTS[@]}" )
+    fi
+    
+    for ref in "${CANDIDATES[@]}"; do
+        if git show-ref -q --verify "refs/$ref"; then
+            BRANCH="${RESULTS[0]}"
+            return 0
+        fi
+        
+        CANDIDATES=( "${CANDIDATES[@]:1}" )
+        RESULTS=( "${RESULTS[@]:1}" )
+    done
+    
+    >&2 echo "ERROR: Branch not found: $BRANCH"
+    return $CRITICAL_EXIT_CODE
 }
 
 function set-if-zero() {
@@ -411,7 +438,7 @@ function do-init() {
         return $CRITICAL_EXIT_CODE
     fi
 
-    resolve-branches
+    resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
     local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
     local LAST_KNOWN_THEIR_REV="0"
     
