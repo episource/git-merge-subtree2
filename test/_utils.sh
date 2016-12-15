@@ -1,12 +1,12 @@
 #!/bin/bash
 
 function invoke-test() {
-    TESTDIR=$(mktemp -d)
-    cd "$TESTDIR"
-    echo "TESTDIR: $TESTDIR"
+    local RUNDIR=$(mktemp -d)
+    cd "$RUNDIR"
+    echo "RUNDIR: $RUNDIR"
 
     the-test
-    SUCCESS=$?
+    local SUCCESS=$?
     
     [[ $SUCCESS -eq 0 ]] && echo "PASSED" || echo "FAILED"
 
@@ -14,6 +14,30 @@ function invoke-test() {
         bash -i
     fi
 
-    rm -rf "$TESTDIR"
+    rm -rf "$RUNDIR"
     exit $SUCCESS
+}
+
+function invoke-all() {
+    local TESTDIR="$1"
+    local PASSED_COUNT=0
+    local FAILED_COUNT=0
+
+    for test in $(ls $TESTDIR); do
+        [[ "$(basename $test)" == "all.sh" ]] && continue
+        
+        >&2 echo -n "TEST: $test... "
+        "$SCRIPT_DIR/$test" 2>/dev/null >/dev/null
+        
+        if [[ $? -eq 0 ]]; then
+            echo "PASSED"
+            (( PASSED_COUNT++ ))
+        else
+            echo "FAILED"
+            (( FAILED_COUNT++ ))
+        fi
+    done
+
+    echo "PASSED: $PASSED_COUNT FAILED: $FAILED_COUNT"
+    exit $FAILED_COUNT
 }
