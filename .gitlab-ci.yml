@@ -1,0 +1,55 @@
+image: nfnty/arch-devel:latest
+
+variables:
+  ZIPNAME: "git-merge-subtree2.zip"
+  LOGFILE: "test/log.txt"
+ 
+stages:
+  - test
+  - deploy
+
+before_script:
+  - pacman -S --noconfirm p7zip
+  
+  - git config --global user.email "ci@gitlab.episource.de"
+  - git config --global user.name "Gitlab-CI"
+  - export PATH="$CI_PROJECT_DIR:$PATH"
+
+  
+.artifact_expiration: &artifact_expiration
+  expire_in: 4 weeks
+  
+.test_template: &test_template
+  stage: test
+  
+  artifacts:
+    <<: *artifact_expiration
+    when: on_failure
+    paths:
+      - "$LOGFILE"
+      
+  
+test_subtree2-strategy:
+  <<: *test_template
+  script:
+    - test/subtree2/all.sh
+    
+test_subproject:
+  <<: *test_template
+  script:
+    - test/subproject/all.sh
+
+deploy:
+  stage: deploy
+  dependencies: []
+  
+  script:
+    - rm -rf test
+    - 7za a -tzip $ZIPNAME *
+    - sha256sum $ZIPNAME > $ZIPNAME.sha256
+  
+  artifacts:
+    <<: *artifact_expiration
+    paths:
+      - "$ZIPNAME"
+      - "$ZIPNAME.sha256"
