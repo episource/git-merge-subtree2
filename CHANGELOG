@@ -1,7 +1,14 @@
-# v0.1.1
+# v0.1.2 (SNAPSHOT)
+- v0.1.1 introduced a bug, that resulted in push-merges not being considered
+  when calculating the merge base (more precise: they have been considered only
+  if "my-prefix" was equal to "their-prefix"). This issue is now resolved.
+- When parsing their branch's history, the order of the marker arguments is not
+  relevant any more. This might improve forward compatibility.
+
+# v0.1.1 (2016-12-07)
 - Multiple subprojects sharing the same combination of source/target-branch are
   now distinguished properly. Previously subprojects were mixed when push
   operations were involved.
   
-# v0.1.0
+# v0.1.0 (2016-11-29)
 - Initial version

@@ -236,7 +236,7 @@ function get-subproject() {
     done
     
     resolve-branches
-    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent "--grep=^$PUSH_MARKER.*-Xtheir-prefix=\"$THEIR_PREFIX\".*-Xtheir-branch=\"$MY_BRANCH\"" $THEIRS --not $BASE )
+    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $THEIRS --not $BASE )
     if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
         local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
         
