@@ -6,8 +6,15 @@ function invoke-test() {
     cd "$RUNDIR"
     echo "RUNDIR: $RUNDIR"
 
+    # define prefix character for test tracing
+    # -> a character different than '+' allows for easier tracing of the git
+    #    command under test
+    PS4="==> "
+    
+    set -x
     the-test
     local SUCCESS=$?
+    set +x
     
     [[ $SUCCESS -eq 0 ]] && echo "PASSED" || echo "FAILED"
 
