@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 function invoke-test() {
     local RUNDIR=$(mktemp -d)
@@ -31,9 +32,9 @@ function invoke-all() {
         [[ "$(basename $test)" == "all.sh" ]] && continue
         
         [[ -s "$LOGFILE" ]] && echo >>"$LOGFILE"
-        echo "=== TEST: $(basename $TESTDIR)/$test ===" >>"$LOGFILE"
+        echo "=== TEST: $(basename $TESTDIR)/$test - $(date -Imin) ===" >>"$LOGFILE"
         >&2 echo -n "TEST: $test... "
-        "$SCRIPT_DIR/$test" &>>"$LOGFILE"
+        "$SCRIPT_DIR/$test" |& cat >>"$LOGFILE"
         
         if [[ $? -eq 0 ]]; then
             echo "PASSED"
@@ -42,8 +43,6 @@ function invoke-all() {
             echo "FAILED"
             (( FAILED_COUNT++ ))
         fi
-        
-        IS_FIRST=
     done
 
     echo "PASSED: $PASSED_COUNT FAILED: $FAILED_COUNT"
