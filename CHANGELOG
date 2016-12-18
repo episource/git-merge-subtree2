@@ -1,4 +1,4 @@
-# v0.1.2 (SNAPSHOT)
+# v0.1.2 (2016-12-18)
 - Accept qualified (remote) branch names (that is 'remotes/origin/branch'
   instead of 'origin/branch').
 - v0.1.1 introduced a bug, that resulted in push-merges not being considered
