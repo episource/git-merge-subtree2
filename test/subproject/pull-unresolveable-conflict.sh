@@ -43,13 +43,13 @@ function the-test() {
 
     # Re-Merge source:subtree => expect conflict!
     STD_ERROUT=$( git subproject pull my-subproject 2>&1 )
-    [[ $? -ne 2 ]] && return 1
+    [[ $? -ne 1 ]] && return 1
     echo "$STD_ERROUT" | tee /proc/self/fd/2 | grep -qi "unmerged files" || return 1
     [[ "$(git diff --diff-filter=U --name-only)" == *my-subproject/subtree.txt ]] || return 1
     
     # Try to continue without resolving the conflicts => expect error
     STD_ERROUT=$( git subproject continue 2>&1 )
-    [[ $? -ne 2 ]] && return 1
+    [[ $? -ne 1 ]] && return 1
     echo "$STD_ERROUT" | tee /proc/self/fd/2 | grep -qi "unmerged files" || return 1
     
     # Resolve conflicts & finalize pull
