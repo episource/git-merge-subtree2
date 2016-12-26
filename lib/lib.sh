@@ -87,45 +87,88 @@ function set-if-zero() {
     fi
 }
 
-# Shift a tree, such that only files found below a given prefix directory are
-# considered for merging. 
-# arguments: <tree> <shift>
-#             <tree>: name of a variable containing the id of a treeish or the
-#                     name of a branch. The variable is updated to the id of
-#                     the shifted treeish.
-#     <their-prefix>: shift tree, such that only files found below
-#                     <their-prefix> are considered
-function shift-tree() {
-    declare -n TREEISH=$1
-    local PREFIX=$2
+# Shift a tree, such that only files matching a given prefix are considered for
+# merging. 
+# Arguments: <tree_var> <from_prefix> <to_prefix> <my_tree>
+#        tree_var: name of a variable referencing a tree object or branch - the
+#                  variable is updated to reference the shifted tree object
+#     from_prefix: only files in the tree referenced by <tree_var>, whose paths
+#                  start with <from_prefix> shall be considered for merging
+#       to_prefix: the prefix of paths matching <from_prefix> is changed to
+#                  <to_prefix>
+#     my_tree: name of a the target tree object or branch
+#
+# The resulting treeish contains files from from <tree_var> and <my_tree>:
+#   - files from <target_tree> not matching <from_prefix>/* and <from_prefix>
+#   - files from <tree_var> matching <from_prefix>/* or <from_prefix> with
+#     <from_prefix> changed to <to_prefix>
+function shift-prefix-directory() {
+    local -n TREE_VAR=$1
+    local FROM_PREFIX=$2
+    local TO_PREFIX=$3
+    local MY_TREE=$4
+
+    local FROM_TREE="$TREE_VAR"
     
-    # if specified, extract the tree object corresponding to $PREFIX
-    if [[ -n $THEIR_PREFIX ]]; then
-        LS_REV=( $(git ls-tree -rd "$TREEISH" | grep "\s$PREFIX$" --max-count 1) )
+    # if specified, extract the tree object corresponding to $FROM_PREFIX
+    if [[ -n "$FROM_PREFIX" ]]; then
+        LS_TREE_RESULT=( $(git ls-tree -rd "$TREE_VAR" | grep --perl-regexp "\t$FROM_PREFIX$" --max-count 1) )
         
-        if [[ -z ${LS_REV[@]} ]]; then
-            >&2 echo "'$TREEISH' does not include a folder '$PREFIX'"
-            exit 2
+        if [[ -z ${LS_TREE_RESULT[@]} ]]; then
+            >&2 echo "'$TREE_VAR' does not include a directory '$FROM_PREFIX'"
+            return 2
         fi
         
-        TREEISH=${LS_REV[2]}
+        FROM_TREE=${LS_TREE_RESULT[2]}
     fi
     
     # use the index to prepare their tree
-    if [[ -z $MY_PREFIX ]]; then
-        # the merge is not limited to a sub directory ($MY_PREFIX) of $MINE,
-        # hence there are no files outside $MY_PREFIX to preserve
-        # => prepare their tree starting with an empty index
+    if [[ -z "$TO_PREFIX" ]]; then
+        # the merge is not limited to a sub directory ($TO_PREFIX) of $MY_TREE,
+        # hence there are no files outside $TO_PREFIX to preserve
+        # => prepare $FROM_TREE starting with an empty index
         git read-tree --empty
-        git read-tree $TREEISH
+        git read-tree "$FROM_TREE"
     else 
-        # the merge is limited to a sub directory ($MY_PREFIX) of $MINE,
-        # hence there are files outside $MY_PREFIX to preserve
-        # => initialize their tree using $MINE and replace everything below
-        #    $MY_PREFIX
-        git reset --mixed $MINE
-        git rm -q --cached "$MY_PREFIX/*" &> /dev/null
-        git read-tree --prefix="$MY_PREFIX" $TREEISH
+        # the merge is limited to a sub directory ($TO_PREFIX) of $MY_TREE,
+        # hence there are files outside $TO_PREFIX to preserve
+        # => initialize $FROM_TREE using $MY_TREE and replace everything below
+        #    $TO_PREFIX
+        git reset --mixed "$MY_TREE"
+        git rm -q --cached "$TO_PREFIX/*" &> /dev/null
+        git read-tree --prefix="$TO_PREFIX" "$FROM_TREE"
     fi
-    TREEISH=$(git write-tree)
+    
+    TREE_VAR=$(git write-tree)
+}
+
+# A merge strategy like built-in resolve.
+# Based on https://github.com/git/git/blob/master/git-merge-resolve.sh
+# Arguments: <my_treeish> <their_treeish> <base_treeish>
+#  xxx_treeish: id of a tree object to merge
+function merge-resolve() {
+    local MY_TREEISH="$1"
+    local THEIR_TREEISH="$2"
+    local BASE_TREEISH="$3"
+    
+    # Update index to match working directory, then merge trees
+    git reset --mixed 
+    git read-tree -m -u --aggressive $BASE_TREEISH $MY_TREEISH $THEIR_TREEISH || return $CRITICAL_EXIT_CODE
+
+    # Read-tree does a simple merge, that might leave unresolved files behind
+    # Using 'git write-tree' it is easy to test for unresolved files.
+    echo "Trying simple merge."
+    if result_tree=$(git write-tree 2>/dev/null); then
+        return 0
+    else 
+        # see https://github.com/git/git/blob/master/git-merge-resolve.sh
+        echo "Simple merge failed, trying Automatic merge."
+        export MERGE_FILE_ARGS="$MERGE_FILE_CONFLICT_STYLE $MERGE_FILE_MODE"
+        if git-merge-index -o git-merge-one-file2 -a
+        then
+            return 0
+        else
+            return $CAN_CONTINUE_EXIT_CODE
+        fi
+    fi
 }

@@ -96,10 +96,7 @@ read-arguments "$@"
 # Check whether "$BASE" is within the list of "first parents" of THEIRS
 # Important: THEIRS needs to be a commit reference and not a shifted TREEISH
 # => `is-base-theirs` can't be used after `shift-tree "THEIRS"`
-function is-base-theirs() {
-    TRUE=0
-    FALSE=1
-    
+function is-base-theirs() {   
     BASE_DATE=$(git show -s $BASE --format=%ci)
     git rev-list --since "$BASE_DATE" --first-parent "$THEIRS" | grep -q "$BASE"
     return $?
@@ -108,36 +105,17 @@ function is-base-theirs() {
 
 if [[ -z $BASE ]]; then
     # 2-way merge: Use mine as base
-    BASE=$MINE
+    BASE="$MINE"
 elif is-base-theirs; then
     # base tree needs to be shifted, because BASE is within the list of 
     # "first parents" of THEIRS and hence paths have not already been adjusted 
-    shift-tree "BASE" "$BASE_PREFIX"
+    shift-prefix-directory "BASE" "$BASE_PREFIX" "$MY_PREFIX" "$MINE"
 fi
 
-shift-tree "THEIRS" "$THEIR_PREFIX"
+shift-prefix-directory "THEIRS" "$THEIR_PREFIX" "$MY_PREFIX" "$MINE"
 
 
 #
 # Merge
 
-# Update index to match working directory, then merge trees
-git reset --mixed 
-git read-tree -m -u --aggressive $BASE $MINE $THEIRS || exit 2
-
-# Read-tree does a simple merge, that might leave unresolved files behind
-# Using 'git write-tree' it is easy to test for unresolved files.
-echo "Trying simple merge."
-if result_tree=$(git write-tree 2>/dev/null); then
-    exit 0
-else 
-    # see https://github.com/git/git/blob/master/git-merge-resolve.sh
-    echo "Simple merge failed, trying Automatic merge."
-    export MERGE_FILE_ARGS="$MERGE_FILE_CONFLICT_STYLE $MERGE_FILE_MODE"
-	if git-merge-index -o git-merge-one-file2 -a
-	then
-		exit 0
-	else
-		exit 1
-	fi
-fi
+merge-resolve "$MINE" "$THEIRS" "$BASE" || exit $?

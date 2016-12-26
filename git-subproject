@@ -247,7 +247,7 @@ function get-context() {
     fi
 }
 
-# Merge using subtree2 strategy
+# Merge like subtree2 strategy
 function merge() {
     local MY_BRANCH="$1"
     local MY_PREFIX="$2"
@@ -257,13 +257,19 @@ function merge() {
     local BASE_PREFIX="$6"
     
     # do the merge
-    git merge --allow-unrelated-histories --squash -s subtree2 $MERGE_FILE_MODE $MERGE_FILE_CONFLICT_STYLE -Xmy-prefix="$MY_PREFIX" -Xbase="$BASE_REV" -Xbase-prefix="$BASE_PREFIX" -Xtheir-prefix="$THEIR_PREFIX" "$THEIR_BRANCH"
+    shift-prefix-directory "BASE_REV"     "$BASE_PREFIX"  "$MY_PREFIX" "$MY_BRANCH" || return $?
+    shift-prefix-directory "THEIR_BRANCH" "$THEIR_PREFIX" "$MY_PREFIX" "$MY_BRANCH" || return $?
+    merge-resolve "$MY_BRANCH" "$THEIR_BRANCH" "$BASE_REV" || return $?
+       
     if [[ -z "$(git status --porcelain)" ]]; then
         >&2 echo "ERROR: No changes to pull/push."
         return $CRITICAL_EXIT_CODE
     fi
 }
 
+# Merge and commit the merged working directory -or- when in case of remaining
+# conflicts, save the current script stateto be picked up by 
+#`git subproject continue` and abort with exit code $CAN_CONTINUE_EXIT_CODE.
 function merge-and-commit() {
     local MARKER="$1"
     local MY_BRANCH="$2"
@@ -275,8 +281,15 @@ function merge-and-commit() {
     local LAST_KNOWN_THEIR_REV="$8"
     
     finalize-message "$MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
-    merge "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX" || return $?
-    commit
+    
+    merge "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX"
+    local MERGE_RESULT=$?
+    
+    if [[ $MERGE_RESULT -ne $CRITICAL_EXIT_CODE ]]; then
+        commit
+    else
+        return $MERGE_RESULT
+    fi
 }
 
 # Read command line arguments
@@ -388,9 +401,11 @@ function do-init() {
 
     resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
     local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
+    local BASE_REV=0
+    local BASE_PREFIX=""
     local LAST_KNOWN_THEIR_REV="0"
     
-    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "HEAD" "$MY_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
 }
 
 function finish-init() { 
