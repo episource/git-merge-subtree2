@@ -1,4 +1,4 @@
-# v0.1.3 (SNAPSHOT)
+# v0.1.3 (2016-12-26)
 - Git-subproject no longer invokes `git merge --squash -s subtree2`, but uses
   the same shared merge implementation as the subtree2 merge strategy (this is
   an internal code change, that might improve performance, but does not affect
