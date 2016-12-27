@@ -143,44 +143,44 @@ function commit() {
 # Add history and subproject markers to the commit message $MESSAGE. A default
 # message is created when $MESSAGE is empty.
 # Arguments: <marker> <my_branch> <my_prefix> <their_prefix> <last_known_their_rev>
-#          <marker>: indicates that the commit is a subproject commit (example:
-#                    git-subproject-pull)
-#       <my_branch>: target branch
-#       <my_prefix>: target branch prefix (subdirectory)
-#    <their_branch>: source branch
-#    <their_prefix>: source branch prefix (subdirectory)
+#           <marker>: indicates that the commit is a subproject commit (example:
+#                     git-subproject-pull)
+#     <local_branch>: target branch
+#     <local_prefix>: target branch prefix (subdirectory)
+#    <remote_branch>: source branch
+#    <remote_prefix>: source branch prefix (subdirectory)
 #    <last_known_their_rev>: log message from this revision up to the tip of
-#                    their_branch are included in the commit message; if
-#                    unspecified the full history is considered; the history
-#                    format is taken from $HISTORY_FORMAT
+#                     their_branch are included in the commit message; if
+#                     unspecified the full history is considered; the history
+#                     format is taken from $HISTORY_FORMAT
 function finalize-message() {
     local MARKER="$1"
-    local MY_BRANCH="$2"
-    local MY_PREFIX="$3"
-    local THEIR_BRANCH="$4"
-    local THEIR_PREFIX="$5"
-    local LAST_KNOWN_THEIR_REV="$6"
+    local LOCAL_BRANCH="$2"
+    local LOCAL_PREFIX="$3"
+    local REMOTE_BRANCH="$4"
+    local REMOTE_PREFIX="$5"
+    local LAST_KNOWN_REMOTE_REV="$6"
 
-    local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
-    local MARKER_LINE="$MARKER -Xmy-prefix=\"$MY_PREFIX\" -Xtheir-branch=\"$THEIR_BRANCH\" -Xtheir-prefix=\"$THEIR_PREFIX\" -Xtheir-rev=\"$THEIR_REV\""
+    local REMOTE_REV=$( git rev-parse $REMOTE_BRANCH )
+    local MARKER_LINE="$MARKER -Xmy-prefix=\"$LOCAL_PREFIX\" -Xtheir-branch=\"$REMOTE_BRANCH\" -Xtheir-prefix=\"$REMOTE_PREFIX\" -Xtheir-rev=\"$REMOTE_REV\""
     
     if [[ -z "$MESSAGE" ]]; then
-        local THEIR_DESC=
-        [[ -n "$THEIR_PREFIX" ]] && THEIR_DESC="$THEIR_BRANCH:$THEIR_PREFIX" || THEIR_DESC="$THEIR_BRANCH:*"
+        local REMOTE_DESC=
+        [[ -n "$REMOTE_PREFIX" ]] && REMOTE_DESC="$REMOTE_BRANCH:$REMOTE_PREFIX" || REMOTE_DESC="$REMOTE_BRANCH:*"
         
-        local MY_DESC=
-        [[ -n "$MY_PREFIX" ]] && MY_DESC="$MY_BRANCH:$MY_PREFIX" || MY_DESC="MY_BRANCH:*"
+        local LOCAL_DESC=
+        [[ -n "$LOCAL_PREFIX" ]] && LOCAL_DESC="$LOCAL_BRANCH:$LOCAL_PREFIX" || LOCAL_DESC="LOCAL_BRANCH:*"
     
-        MESSAGE="Merge '$THEIR_DESC' into '$MY_DESC'"
+        MESSAGE="Merge '$REMOTE_DESC' into '$LOCAL_DESC'"
     fi
     
-    if [[ -n "$LAST_KNOWN_THEIR_REV" ]]; then
-        local LIMIT="^$LAST_KNOWN_THEIR_REV"
-        if [[ "$LAST_KNOWN_THEIR_REV" == "$EMPTY_TREE" ]]; then
+    if [[ -n "$LAST_KNOWN_REMOTE_REV" ]]; then
+        local LIMIT="^$LAST_KNOWN_REMOTE_REV"
+        if [[ "$LAST_KNOWN_REMOTE_REV" == "$EMPTY_TREE" ]]; then
             LIMIT=""
         fi
         
-        local HISTORY=$( git log --format="$HISTORY_FORMAT" $THEIR_BRANCH $LIMIT -- $THEIR_PREFIX | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
+        local HISTORY=$( git log --format="$HISTORY_FORMAT" $REMOTE_BRANCH $LIMIT -- $REMOTE_PREFIX | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
         if [[ -n "$HISTORY" ]]; then
             MESSAGE+="$NL$NL$HISTORY"
         fi
@@ -248,17 +248,17 @@ function get-context() {
 
 # Merge like subtree2 strategy
 function merge() {
-    local MY_BRANCH="$1"
-    local MY_PREFIX="$2"
-    local THEIR_BRANCH="$3"
-    local THEIR_PREFIX="$4"
+    local LOCAL_BRANCH="$1"
+    local LOCAL_PREFIX="$2"
+    local REMOTE_BRANCH="$3"
+    local REMOTE_PREFIX="$4"
     local BASE_REV="$5"
     local BASE_PREFIX="$6"
     
     # do the merge
-    shift-prefix-directory "BASE_REV"     "$BASE_PREFIX"  "$MY_PREFIX" "$MY_BRANCH" || return $?
-    shift-prefix-directory "THEIR_BRANCH" "$THEIR_PREFIX" "$MY_PREFIX" "$MY_BRANCH" || return $?
-    merge-resolve "$MY_BRANCH" "$THEIR_BRANCH" "$BASE_REV" || return $?
+    shift-prefix-directory "BASE_REV" "$BASE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" || return $?
+    shift-prefix-directory "REMOTE_BRANCH" "$REMOTE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" || return $?
+    merge-resolve "$LOCAL_BRANCH" "$REMOTE_BRANCH" "$BASE_REV" || return $?
        
     if [[ -z "$(git status --porcelain)" ]]; then
         >&2 echo "ERROR: No changes to pull/push."
@@ -271,17 +271,17 @@ function merge() {
 #`git subproject continue` and abort with exit code $CAN_CONTINUE_EXIT_CODE.
 function merge-and-commit() {
     local MARKER="$1"
-    local MY_BRANCH="$2"
-    local MY_PREFIX="$3"
-    local THEIR_BRANCH="$4"
-    local THEIR_PREFIX="$5"
+    local LOCAL_BRANCH="$2"
+    local LOCAL_PREFIX="$3"
+    local REMOTE_BRANCH="$4"
+    local REMOTE_PREFIX="$5"
     local BASE_REV="$6"
     local BASE_PREFIX="$7"
     local LAST_KNOWN_THEIR_REV="$8"
     
-    finalize-message "$MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+    finalize-message "$MARKER" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$REMOTE_BRANCH" "$REMOTE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
     
-    merge "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX"
+    merge "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$REMOTE_BRANCH" "$REMOTE_PREFIX" "$BASE_REV" "$BASE_PREFIX"
     local MERGE_RESULT=$?
     
     if [[ $MERGE_RESULT -ne $CRITICAL_EXIT_CODE ]]; then
@@ -347,33 +347,36 @@ function read-arguments() {
         local VAL="${1##*=}"
         
         case "$1" in
-            --their-branch=*)
-                THEIR_BRANCH="$VAL"
-                ;;
-            --their-prefix=*)
-                THEIR_PREFIX=$(normalize-prefix "$VAL")
-                ;;
             --base=*)
                 BASE="$VAL"
                 ;;
             --base-prefix=*)
                 BASE_PREFIX=$(normalize-prefix "$VAL")
                 ;;
-            -m|--message)
-                MESSAGE=$2
-                shift
+            --diff3)
+                MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
                 ;;
             --format=*)
                 HISTORY_FORMAT="$VAL"
                 ;;
-            --diff3)
-                MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
+            -m)
+                MESSAGE=$2
+                shift
+                ;;
+            --message=*)
+                MESSAGE="$VAL"
                 ;;
             --ours)
                 MERGE_FILE_MODE="-Xours"
                 ;;
             --theirs)
                 MERGE_FILE_MODE="-Xtheirs"
+                ;;
+            --their-branch=*)
+                THEIR_BRANCH="$VAL"
+                ;;
+            --their-prefix=*)
+                THEIR_PREFIX=$(normalize-prefix "$VAL")
                 ;;
             --union)
                 MERGE_FILE_MODE="-Xunion"

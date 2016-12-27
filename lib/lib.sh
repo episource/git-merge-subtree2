@@ -90,33 +90,34 @@ function set-if-zero() {
 
 # Shift a tree, such that only files matching a given prefix are considered for
 # merging. 
-# Arguments: <tree_var> <from_prefix> <to_prefix> <my_tree>
-#        tree_var: name of a variable referencing a tree object or branch - the
-#                  variable is updated to reference the shifted tree object
-#     from_prefix: only files in the tree referenced by <tree_var>, whose paths
-#                  start with <from_prefix> shall be considered for merging
-#       to_prefix: the prefix of paths matching <from_prefix> is changed to
-#                  <to_prefix>
-#     my_tree: name of a the target tree object or branch
+# Arguments: <remote_tree_var> <remote_prefix> <local_tree> <local_prefix>
+#   remote_tree_var: name of a variable referencing a tree object or branch
+#                    - the variable is updated to reference the shifted tree
+#                    object
+#     remote_prefix: only files in the tree referenced by <tree_var>, whose paths
+#                    start with <from_prefix> shall be considered for merging
+#        local_tree: name of a the target tree object or branch
+#      local_prefix: the prefix of paths matching <remote_prefix> is changed to
+#                    <local_prefix>
 #
 # The resulting treeish contains files from from <tree_var> and <my_tree>:
-#   - files from <target_tree> not matching <from_prefix>/* and <from_prefix>
-#   - files from <tree_var> matching <from_prefix>/* or <from_prefix> with
-#     <from_prefix> changed to <to_prefix>
+#   - files from <local_tree> not matching <local_prefix>/*
+#   - files from <remote_tree_var> matching <remote_prefix>/* with 
+#     <remote_prefix> changed to <local_prefix>
 function shift-prefix-directory() {
-    local -n TREE_VAR=$1
-    local FROM_PREFIX=$2
-    local TO_PREFIX=$3
-    local MY_TREE=$4
+    local -n REMOTE_TREE_VAR=$1
+    local REMOTE_PREFIX=$2
+    local LOCAL_TREE=$3
+    local LOCAL_PREFIX=$4
 
-    local FROM_TREE="$TREE_VAR"
+    local FROM_TREE="$REMOTE_TREE_VAR"
     
-    # if specified, extract the tree object corresponding to $FROM_PREFIX
-    if [[ -n "$FROM_PREFIX" ]]; then
-        LS_TREE_RESULT=( $(git ls-tree -rd "$TREE_VAR" | grep --perl-regexp "\t$FROM_PREFIX$" --max-count 1) )
+    # if specified, extract the tree object corresponding to $REMOTE_PREFIX
+    if [[ -n "$REMOTE_PREFIX" ]]; then
+        LS_TREE_RESULT=( $(git ls-tree -rd "$REMOTE_TREE_VAR" | grep --perl-regexp "\t$REMOTE_PREFIX$" --max-count 1) )
         
         if [[ -z ${LS_TREE_RESULT[@]} ]]; then
-            >&2 echo "'$TREE_VAR' does not include a directory '$FROM_PREFIX'"
+            >&2 echo "'$REMOTE_TREE_VAR' does not include a directory '$REMOTE_PREFIX'"
             return 2
         fi
         
@@ -124,37 +125,37 @@ function shift-prefix-directory() {
     fi
     
     # use the index to prepare their tree
-    if [[ -z "$TO_PREFIX" ]]; then
-        # the merge is not limited to a sub directory ($TO_PREFIX) of $MY_TREE,
-        # hence there are no files outside $TO_PREFIX to preserve
-        # => prepare $FROM_TREE starting with an empty index
+    if [[ -z "$LOCAL_PREFIX" ]]; then
+        # the merge is not limited to a sub directory ($LOCAL_PREFIX) of
+        # $LOCAL_TREE, hence there are no files outside $LOCAL_PREFIX to
+        # preserve => prepare $FROM_TREE starting with an empty index
         git read-tree --empty
         git read-tree "$FROM_TREE"
     else 
-        # the merge is limited to a sub directory ($TO_PREFIX) of $MY_TREE,
-        # hence there are files outside $TO_PREFIX to preserve
-        # => initialize $FROM_TREE using $MY_TREE and replace everything below
-        #    $TO_PREFIX
-        git reset --mixed "$MY_TREE"
-        git rm -q --cached "$TO_PREFIX/*" &> /dev/null
-        git read-tree --prefix="$TO_PREFIX" "$FROM_TREE"
+        # the merge is limited to a sub directory ($LOCAL_PREFIX) of $MY_TREE,
+        # hence there are files outside $LOCAL_PREFIX to preserve
+        # => initialize $FROM_TREE using $LOCAL_TREE and replace everything below
+        #    $LOCAL_PREFIX
+        git reset --mixed "$LOCAL_TREE"
+        git rm -q --cached "$LOCAL_PREFIX/*" &> /dev/null
+        git read-tree --prefix="$LOCAL_PREFIX" "$FROM_TREE"
     fi
-    
-    TREE_VAR=$(git write-tree)
+        
+    REMOTE_TREE_VAR=$(git write-tree)
 }
 
 # A merge strategy like built-in resolve.
 # Based on https://github.com/git/git/blob/master/git-merge-resolve.sh
-# Arguments: <my_treeish> <their_treeish> <base_treeish>
-#  xxx_treeish: id of a tree object to merge
+# Arguments: <local_tree> <remote_tree> <base_tree>
+#  xxx_tree: id of a tree object to merge
 function merge-resolve() {
-    local MY_TREEISH="$1"
-    local THEIR_TREEISH="$2"
-    local BASE_TREEISH="$3"
+    local LOCAL_TREE="$1"
+    local REMOTE_TREE="$2"
+    local BASE_TREE="$3"
     
     # Update index to match working directory, then merge trees
     git reset --mixed 
-    git read-tree -m -u --aggressive $BASE_TREEISH $MY_TREEISH $THEIR_TREEISH || return $CRITICAL_EXIT_CODE
+    git read-tree -m -u --aggressive $BASE_TREE $LOCAL_TREE $REMOTE_TREE || return $CRITICAL_EXIT_CODE
 
     # Read-tree does a simple merge, that might leave unresolved files behind
     # Using 'git write-tree' it is easy to test for unresolved files.

@@ -102,17 +102,16 @@ function is-base-theirs() {
     return $?
 }
 
-
 if [[ -z $BASE ]]; then
     # 2-way merge: Use mine as base
     BASE="$MINE"
 elif is-base-theirs; then
     # base tree needs to be shifted, because BASE is within the list of 
     # "first parents" of THEIRS and hence paths have not already been adjusted 
-    shift-prefix-directory "BASE" "$BASE_PREFIX" "$MY_PREFIX" "$MINE"
+    shift-prefix-directory "BASE" "$BASE_PREFIX" "$MINE" "$MY_PREFIX" 
 fi
 
-shift-prefix-directory "THEIRS" "$THEIR_PREFIX" "$MY_PREFIX" "$MINE"
+shift-prefix-directory "THEIRS" "$THEIR_PREFIX" "$MINE" "$MY_PREFIX"
 
 
 #
