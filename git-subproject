@@ -177,7 +177,7 @@ function finalize-message() {
     
     if [[ -n "$LAST_KNOWN_THEIR_REV" ]]; then
         local LIMIT="^$LAST_KNOWN_THEIR_REV"
-        if [[ "$LAST_KNOWN_THEIR_REV" == "0" ]]; then
+        if [[ "$LAST_KNOWN_THEIR_REV" == "$EMPTY_TREE" ]]; then
             LIMIT=""
         fi
         
@@ -401,9 +401,9 @@ function do-init() {
 
     resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
     local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
-    local BASE_REV=0
+    local BASE_REV="$EMPTY_TREE"
     local BASE_PREFIX=""
-    local LAST_KNOWN_THEIR_REV="0"
+    local LAST_KNOWN_THEIR_REV="$EMPTY_TREE"
     
     merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
 }
@@ -477,7 +477,7 @@ function do-push() {
     fi
     
     if [[ -z "$LAST_KNOWN_MY_REV" ]]; then 
-        LAST_KNOWN_MY_REV="0"
+        LAST_KNOWN_MY_REV="$EMPTY_TREE"
     fi
     
     git checkout -q "$THEIR_BRANCH"

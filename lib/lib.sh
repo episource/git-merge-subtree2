@@ -5,6 +5,7 @@
 #
 # Constants
 GIT_REPO=$( git rev-parse --git-dir )
+EMPTY_TREE=$( git hash-object -t tree /dev/null )
 CRITICAL_EXIT_CODE=2
 CAN_CONTINUE_EXIT_CODE=1
 TRUE=0
