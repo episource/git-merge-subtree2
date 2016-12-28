@@ -15,6 +15,8 @@ THEIR_BRANCH=
 MY_PREFIX=
 THEIR_PREFIX=
 BASE_PREFIX=
+FILTER=
+BASE_FILTER=
 MESSAGE=
 HISTORY_FORMAT="medium"
 MERGE_FILE_CONFLICT_STYLE=""
@@ -44,8 +46,8 @@ history does not become cluttered. Source branch and commit are remembered
 within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
     
-git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--diff3] [--ours|--theirs|--union]
+git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
 git subproject push <my-prefix> [-m <message>] [--format=<format>]
 
 Init:
@@ -58,6 +60,9 @@ Init:
                   current branch
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
+          filter: optional - limit merging to the set of files matching the
+                  given regular expression; the regular expression is matched
+                  against the file path relative to the subproject directory
          message: optional - custom commit message
           format: optional - pass to \`git log\`'s format option when appending
                   a description of the merged history to the commit message; use
@@ -81,6 +86,12 @@ Pull:
      base-prefix: optional - overwrite the prefix applied to the common
                   ancestor; this might be necessary when specifying a custom
                   base
+          filter: optional - limit merging to the set of files matching the
+                  given regular expression; the regular expression is matched
+                  against the file path relative to the subproject directory
+     base-filter: optional - like filter, but applied to the base revision,
+                  only; this option can be usefull when explicitly specifying abort
+                  base revision and file names have changed
          message: optional - custom commit message
           format: optional - pass to \`git log\`'s format option when appending
                   a description of the merged history to the commit message; use
@@ -162,7 +173,7 @@ function finalize-message() {
     local LAST_KNOWN_REMOTE_REV="$6"
 
     local REMOTE_REV=$( git rev-parse $REMOTE_BRANCH )
-    local MARKER_LINE="$MARKER -Xmy-prefix=\"$LOCAL_PREFIX\" -Xtheir-branch=\"$REMOTE_BRANCH\" -Xtheir-prefix=\"$REMOTE_PREFIX\" -Xtheir-rev=\"$REMOTE_REV\""
+    local MARKER_LINE="$MARKER -Xmy-prefix=\"$LOCAL_PREFIX\" -Xtheir-branch=\"$REMOTE_BRANCH\" -Xtheir-prefix=\"$REMOTE_PREFIX\" -Xtheir-rev=\"$REMOTE_REV\" -Xfilter=\"$FILTER\""
     
     if [[ -z "$MESSAGE" ]]; then
         local REMOTE_DESC=
@@ -220,6 +231,14 @@ function get-context() {
             -Xtheir-rev=*)
                 LAST_PULL_THEIR_REV="$VAL"
                 ;;
+            -Xfilter=*)
+                if [[ -z "$FILTER" ]]; then
+                    FILTER="$VAL"
+                fi
+                if [[ -z "$BASE_FILTER" ]]; then
+                    BASE_FILTER="$VAL"
+                fi
+                ;;
         esac
     done
     
@@ -255,9 +274,14 @@ function merge() {
     local BASE_REV="$5"
     local BASE_PREFIX="$6"
     
+    local ACTUAL_BASE_FILTER="$BASE_FILTER"
+    if [[ -z "$ACTUAL_BASE_FILTER" ]]; then
+        ACTUAL_BASE_FILTER="$FILTER"
+    fi
+    
     # do the merge
-    shift-prefix-directory "BASE_REV" "$BASE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" || return $?
-    shift-prefix-directory "REMOTE_BRANCH" "$REMOTE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" || return $?
+    prepare-remote-tree "BASE_REV" "$BASE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$ACTUAL_BASE_FILTER" || return $?
+    prepare-remote-tree "REMOTE_BRANCH" "$REMOTE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$FILTER" || return $?
     merge-resolve "$LOCAL_BRANCH" "$REMOTE_BRANCH" "$BASE_REV" || return $?
        
     if [[ -z "$(git status --porcelain)" ]]; then
@@ -294,8 +318,8 @@ function merge-and-commit() {
 # Read command line arguments
 function read-arguments() {
     local COMMON_ARGS=( "-m" "--message" "--format" )
-    local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" )
-    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--diff3" "--ours" "--theirs" "--union")
+    local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" "--filter" )
+    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--base-filter" "--diff3" "--ours" "--theirs" "--union")
     local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
     local CONTINUE_ARGS=( )
     local -n ALLOWED_ARGS
@@ -350,11 +374,17 @@ function read-arguments() {
             --base=*)
                 BASE="$VAL"
                 ;;
+            --base-filter=*)
+                BASE_FILTER="$VAL"
+                ;;
             --base-prefix=*)
                 BASE_PREFIX=$(normalize-prefix "$VAL")
                 ;;
             --diff3)
                 MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
+                ;;
+            --filter=*)
+                FILTER="$VAL"
                 ;;
             --format=*)
                 HISTORY_FORMAT="$VAL"
@@ -472,7 +502,19 @@ function do-push() {
     fi
     
     # refuse to push if their side has unknown changes
-    if ! git diff --no-ext-diff --quiet --exit-code $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX"; then
+    local THEIRS_HAS_CHANGED=$FALSE
+    if [[ -z "$FILTER" ]]; then
+        # without FILTER, there's no need for a complex pipeline
+        if ! git diff --no-ext-diff --quiet --exit-code $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX"; then
+            THEIRS_HAS_CHANGED=$TRUE
+        fi
+    else
+        # with FILTER, the list of changed files needs to be filtered
+        if git diff --name-only --no-ext-diff --relative="$THEIR_PREFIX" $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX" | grep -q --perl-regexp "$FILTER"; then
+            THEIRS_HAS_CHANGED=$TRUE
+        fi
+    fi
+    if [[ $THEIRS_HAS_CHANGED -eq $TRUE ]]; then
         >&2 echo "ERROR: Their branch '$THEIR_BRANCH' has changes that have not been pulled."
         >&2 echo "ERROR: You need to pull these changes first!"
         exit $CRITICAL_EXIT_CODE

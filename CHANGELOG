@@ -1,3 +1,7 @@
+# v0.2.0 (SNAPSHOT)
+- Add a 'filter' argument to select only subproject files for merging, that
+  match a given file name/path pattern (the 'filter').
+
 # v0.1.4 (2016-12-29)
 - Fix git warning 'fatal: Not a valid object name 0' when initializing a
   subproject. Note: the warning did not affect initialization of the subproject!

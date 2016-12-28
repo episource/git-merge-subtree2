@@ -88,8 +88,8 @@ function set-if-zero() {
     fi
 }
 
-# Shift a tree, such that only files matching a given prefix are considered for
-# merging. 
+# Prepare a tree for merging, such that only files matching a given prefix and
+# filter regexp are considered for merging. 
 # Arguments: <remote_tree_var> <remote_prefix> <local_tree> <local_prefix>
 #   remote_tree_var: name of a variable referencing a tree object or branch
 #                    - the variable is updated to reference the shifted tree
@@ -102,13 +102,14 @@ function set-if-zero() {
 #
 # The resulting treeish contains files from from <tree_var> and <my_tree>:
 #   - files from <local_tree> not matching <local_prefix>/*
-#   - files from <remote_tree_var> matching <remote_prefix>/* with 
-#     <remote_prefix> changed to <local_prefix>
-function shift-prefix-directory() {
+#   - files from <remote_tree> matching <remote_prefix>/* and <filter_regex> 
+#     with <remote_prefix> changed to <local_prefix>
+function prepare-remote-tree() {
     local -n REMOTE_TREE_VAR=$1
     local REMOTE_PREFIX=$2
     local LOCAL_TREE=$3
     local LOCAL_PREFIX=$4
+    local FILTER_REGEXP=$5
 
     local FROM_TREE="$REMOTE_TREE_VAR"
     
@@ -139,6 +140,12 @@ function shift-prefix-directory() {
         git reset --mixed "$LOCAL_TREE"
         git rm -q --cached "$LOCAL_PREFIX/*" &> /dev/null
         git read-tree --prefix="$LOCAL_PREFIX" "$FROM_TREE"
+    fi
+    
+    if [[ -n "$FILTER_REGEXP" ]]; then
+        git ls-files -c -- "$LOCAL_PREFIX" | sed -e "s/^$LOCAL_PREFIX\///" \
+            | grep -v --perl-regexp "$FILTER_REGEXP" \
+            | xargs  --replace git rm -rfq --cached "$LOCAL_PREFIX/{}"
     fi
         
     REMOTE_TREE_VAR=$(git write-tree)

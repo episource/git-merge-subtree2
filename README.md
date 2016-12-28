@@ -36,8 +36,8 @@ history does not become cluttered. Source branch and commit are remembered
 within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
     
-git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--diff3] [--ours|--theirs|--union]
+git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
 git subproject push <my-prefix> [-m <message>] [--format=<format>]
 
 Init:
@@ -50,6 +50,9 @@ Init:
                   current branch
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
+          filter: optional - limit merging to the set of files matching the
+                  given regular expression; the regular expression is matched
+                  against the file path relative to the subproject directory
          message: optional - custom commit message
           format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
@@ -73,6 +76,12 @@ Pull:
      base-prefix: optional - overwrite the prefix applied to the common
                   ancestor; this might be necessary when specifying a custom
                   base
+          filter: optional - limit merging to the set of files matching the
+                  given regular expression; the regular expression is matched
+                  against the file path relative to the subproject directory
+     base-filter: optional - like filter, but applied to the base revision,
+                  only; this option can be usefull when explicitly specifying abort
+                  base revision and file names have changed
          message: optional - custom commit message
           format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
