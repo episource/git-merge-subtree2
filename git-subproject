@@ -17,6 +17,7 @@ THEIR_PREFIX=
 BASE_PREFIX=
 FILTER=
 BASE_FILTER=
+FILTER_MODE="regexp"
 MESSAGE=
 HISTORY_FORMAT="medium"
 MERGE_FILE_CONFLICT_STYLE=""
@@ -46,8 +47,8 @@ history does not become cluttered. Source branch and commit are remembered
 within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
     
-git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
+git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
 git subproject push <my-prefix> [-m <message>] [--format=<format>]
 
 Init:
@@ -318,8 +319,8 @@ function merge-and-commit() {
 # Read command line arguments
 function read-arguments() {
     local COMMON_ARGS=( "-m" "--message" "--format" )
-    local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" "--filter" )
-    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--base-filter" "--diff3" "--ours" "--theirs" "--union")
+    local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" )
+    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" "--base-filter" "--diff3" "--ours" "--theirs" "--union")
     local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
     local CONTINUE_ARGS=( )
     local -n ALLOWED_ARGS
@@ -386,6 +387,12 @@ function read-arguments() {
             --filter=*)
                 FILTER="$VAL"
                 ;;
+            --filter-is-regexp)
+                FILTER_MODE="regexp"
+                ;;
+            --filter-is-glob)
+                FILTER_MODE="glob"
+                ;;
             --format=*)
                 HISTORY_FORMAT="$VAL"
                 ;;
@@ -419,6 +426,14 @@ function read-arguments() {
     done
 
     [[ "$MODE" == "continue" || -n "$MY_PREFIX" ]] || help
+    
+    if [[ "$FILTER_MODE" == "glob" ]]; then
+        normalize-glob "FILTER"
+        glob-to-regexp "FILTER"
+        
+        normalize-glob "BASE_FILTER"
+        glob-to-regexp "BASE_FILTER"
+    fi
 }
 
 

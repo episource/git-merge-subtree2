@@ -41,6 +41,149 @@ function fail-if-dirty() {
     fi
 }
 
+# Convert GLOB to a perl style regular expression, that mimics bash's behavior
+# of filename expansions with options 'globstar' and 'dotglob' enabled, as well
+# as 'extglob' disabled - see section 3.5.8 of the bash reference manual for
+# details
+# Features currently not supported:
+#  - predefined character classes ([:alnum:], ...)
+#  - equivalence classes ([=c=], ...)
+#  - matching of collating symbols ([.symbol.])
+#
+# Arguments: <pattern_var>
+#   pattern_var: Variable with a glob pattern - the glob is converted in-place.
+function glob-to-regexp() {
+    local -n PATTERN_VAR="$1"
+    
+    local GLOB="$PATTERN_VAR"
+    local REGEXP=""
+
+    
+    function _regexp-escape-char() {
+        # escape any of these: .^$*+-?()[]{}\|
+        case "$1" in
+            #escape any of these
+            '.'|'^'|'$'|'*'|'+'|'-'|'?'|'('|')'|'['|']'|'{'|'}'|'\'|'|')
+                echo -n "\\$1"
+                ;;
+            *)
+                echo -n "$1"
+                ;;
+        esac
+    }
+    
+
+    local GLOB_LEN=${#GLOB}
+    local GLOB_IDX=0
+    while [[ $GLOB_IDX -lt $GLOB_LEN ]]; do
+        local CHAR="${GLOB:$GLOB_IDX:1}"
+        (( GLOB_IDX++ ))
+        
+        case "$CHAR" in
+            '*')
+                # globstar:
+                #   (1)   * don't match '/'
+                #   (2)  ** (at end of pattern) match zero or more 
+                #       (sub)directories and all files therein
+                #   (3)  ** (in the middle of pattern) match all filenames in
+                #       the current directory and zero or more (sub)directories
+                #       (but not the files in any of the subdirectories)
+                #   (4) **/ match zero or more (sub)directories
+                # Note: ** behaves differently when used at the end of a pattern
+                #       - this is not obvious from the bash reference manual
+                #       (see below) and has been observed while analyzing
+                #       negative outcomes of test 'subproject/filter-glob.sh'. 
+                #       Quoting the reference manual of bash version 4.4,
+                #       section 3.5.8.1:
+                #       "When the globstar shell option is enabled, and ‘*’ is
+                #       used in a filename expansion context, two adjacent ‘*’s
+                #       used as a single pattern will match all files and zero
+                #       or more directories and subdirectories. If followed by a
+                #       ‘/’, two adjacent ‘*’s will match only directories and
+                #       subdirectories."
+                if [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "*" ]]; then
+                    (( GLOB_IDX++ ))
+                    
+                    if [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "/" ]]; then
+                        # case (4) above
+                        (( GLOB_IDX++ ))
+                        REGEXP+="(.+/)*"
+                    elif [[ $GLOB_IDX -eq $GLOB_LEN ]]; then
+                        # case (2) above
+                        REGEXP+=".*"
+                    else
+                        # case (3) above
+                        REGEXP+="([^/]*|(.+/)*)"
+                    fi
+                else 
+                    # case (1) above
+                    REGEXP+="[^/]*"
+                fi
+                ;;
+            '?')
+                REGEXP+="."
+                ;;
+            '[')
+                # Note: GLOB_IDX has been incremented above!
+                # => It points to `pos($CHAR) + 1` which is the first character
+                #    within the character group!
+                local GROUP_IDX=$GLOB_IDX
+                
+                # In the following two cases, the first ']' is part of the character
+                # group: '[]]', '[!]]'
+                # => skip when searching the end of the group
+                [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" == "!" ]] && \
+                    (( GROUP_IDX++ ))
+                [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" == "]" ]] && \
+                    (( GROUP_IDX++ ))
+                
+                # Search and of character group - lateron $GROUP_IDX points to the
+                # closing character of the group or it is equal to $GLOB_LEN if the
+                # group has not been closed
+                while [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" != "]" ]]; do
+                    ((GROUP_IDX++))
+                done
+                
+                if [[ $GROUP_IDX -ge $GLOB_LEN ]]; then
+                    # it's not a character group without a closing ']' - escape
+                    REGEXP+="\\["
+                else
+                    local GROUP_COUNT=$(( $GROUP_IDX - $GLOB_IDX ))
+                    local GROUP_CONTENT="${GLOB:$GLOB_IDX:$GROUP_COUNT}"
+                    
+                    # Within a group, the following escapes must be applied
+                    # 1. escape all backslashes
+                    GROUP_CONTENT="${GROUP_CONTENT//\\/\\\\}"
+                    
+                    # 2. group starts with '!' (negation)
+                    [[ "$GROUP_CONTENT" == '!'* ]] && \
+                        GROUP_CONTENT="${GROUP_CONTENT/!/^}"
+                    
+                    # note: group starts with '^' also means negation, which is
+                    # equal to regexp
+                                       
+                    GLOB_IDX=$(( $GROUP_IDX + 1 ))
+                    REGEXP+="[$GROUP_CONTENT]"
+                fi
+                ;;
+            *)
+                REGEXP+="$( _regexp-escape-char $CHAR )"
+                ;;
+        esac
+    done
+
+    PATTERN_VAR="^$REGEXP$"
+}
+
+# remove leading './' or '/' from filter globstar
+# arguments: <glob_var>
+#    glob_var: variable storing the glob pattern - updated in-place
+function normalize-glob() {
+    local -n GLOB_VAR=$1
+    GLOB_VAR="${GLOB_VAR#./}"
+    GLOB_VAR="${GLOB_VAR#/}"
+}
+
 # remove leading and trailing slashs, reduce duplicated slashs to single slashs
 function normalize-prefix() {
     echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
