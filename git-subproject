@@ -344,7 +344,8 @@ function read-arguments() {
     case "$MODE" in
         init|pull|push)
             [[ $# -lt 2 ]] && help
-            MY_PREFIX=$(normalize-prefix "$2")
+            MY_PREFIX="$2"
+            normalize-prefix "MY_PREFIX"
             shift 2
             ;;
         continue)
@@ -379,7 +380,8 @@ function read-arguments() {
                 BASE_FILTER="$VAL"
                 ;;
             --base-prefix=*)
-                BASE_PREFIX=$(normalize-prefix "$VAL")
+                BASE_PREFIX="$VAL"
+                normalize-prefix "BASE_PREFIX"
                 ;;
             --diff3)
                 MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
@@ -413,7 +415,8 @@ function read-arguments() {
                 THEIR_BRANCH="$VAL"
                 ;;
             --their-prefix=*)
-                THEIR_PREFIX=$(normalize-prefix "$VAL")
+                THEIR_PREFIX="$VAL"
+                normalize-prefix "THEIR_PREFIX"
                 ;;
             --union)
                 MERGE_FILE_MODE="-Xunion"

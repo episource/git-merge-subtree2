@@ -185,8 +185,11 @@ function normalize-glob() {
 }
 
 # remove leading and trailing slashs, reduce duplicated slashs to single slashs
+# arguments: <prefix_var>
+#    prefix_var: variable storing the prefix path - updated in-place
 function normalize-prefix() {
-    echo -n "$1" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" 
+    local -n PREFIX_VAR=$1
+    PREFIX_VAR=$( echo -n "$PREFIX_VAR" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" )
 }
 
 # Validate and resolve the branch/reference name stored in a variable named $1

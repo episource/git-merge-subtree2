@@ -37,13 +37,16 @@ function read-arguments() {
 
         case "$1" in
             --their-prefix=*)
-                THEIR_PREFIX=$(normalize-prefix "$VAL")
+                THEIR_PREFIX="$VAL"
+                normalize-prefix "THEIR_PREFIX"
                 ;;
             --my-prefix=*)
-                MY_PREFIX=$(normalize-prefix "$VAL")
+                MY_PREFIX="$VAL"
+                normalize-prefix "MY_PREFIX"
                 ;;
             --base-prefix=*)
-                BASE_PREFIX=$(normalize-prefix "$VAL")
+                BASE_PREFIX="$VAL"
+                normalize-prefix "BASE_PREFIX"
                 ;;
             --base=*)
                 BASE="$VAL"
