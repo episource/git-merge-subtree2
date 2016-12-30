@@ -36,8 +36,8 @@ history does not become cluttered. Source branch and commit are remembered
 within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
     
-git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
+git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
 git subproject push <my-prefix> [-m <message>] [--format=<format>]
 
 Init:
@@ -51,8 +51,19 @@ Init:
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
           filter: optional - limit merging to the set of files matching the
-                  given regular expression; the regular expression is matched
-                  against the file path relative to the subproject directory
+                  given glob pattern (see --filter-is-glob); the pattern is is
+                  matched against the file path relative to the subproject
+                  directory
+  filter-is-glob: default - interpret --filter as glob pattern, such that
+                  subproject mimics bash's behavior of filename expansion with
+                  options 'globstar' and 'dotglob' enabled, as well as 'extglob'
+                  disabled - see section 3.5.8 of the bash reference manual for
+                  details; the following features are currently not supported,
+                  however: predefined character classes ([:alnum:], ...),
+                  equivalence classes ([=c=], ...) and matching of collating
+                  symbols ([.symbol.])
+filter-is-regexp: optional - interpret --filter as perl style regular expression
+                  - see `man pcre`
          message: optional - custom commit message
           format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
@@ -77,8 +88,19 @@ Pull:
                   ancestor; this might be necessary when specifying a custom
                   base
           filter: optional - limit merging to the set of files matching the
-                  given regular expression; the regular expression is matched
-                  against the file path relative to the subproject directory
+                  given glob pattern (see --filter-is-glob); the pattern is is
+                  matched against the file path relative to the subproject
+                  directory
+  filter-is-glob: default - interpret --filter as glob pattern, such that
+                  subproject mimics bash's behavior of filename expansion with
+                  options 'globstar' and 'dotglob' enabled, as well as 'extglob'
+                  disabled - see section 3.5.8 of the bash reference manual for
+                  details; the following features are currently not supported,
+                  however: predefined character classes ([:alnum:], ...),
+                  equivalence classes ([=c=], ...) and matching of collating
+                  symbols ([.symbol.])
+filter-is-regexp: optional - interpret --filter as perl style regular expression
+                  - see `man pcre`
      base-filter: optional - like filter, but applied to the base revision,
                   only; this option can be usefull when explicitly specifying abort
                   base revision and file names have changed

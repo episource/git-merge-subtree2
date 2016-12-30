@@ -22,7 +22,7 @@ function the-test() {
     git commit -m "target: initial commit"
 
     # Initialize subproject
-    git subproject init my-subproject source --their-prefix=subtree --filter="^.*\.old"
+    git subproject init my-subproject source --their-prefix=subtree --filter-is-regexp --filter="^.*\.old"
     
     # Ensure only subtree.txt was pulled
     if [[ ! -f my-subproject/subtree.old ]]; then
@@ -38,7 +38,7 @@ function the-test() {
 
     # Update filter and pull changes
     git checkout target
-    git subproject pull my-subproject --filter="^.*\.new" || return $?
+    git subproject pull my-subproject --filter-is-regexp --filter="^.*\.new" || return $?
 
     # Assert
     # ...file has been renamed locally

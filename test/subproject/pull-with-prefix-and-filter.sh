@@ -23,7 +23,7 @@ function the-test() {
     git commit -m "target: initial commit"
 
     # Initialize subproject
-    git subproject init my-subproject source --their-prefix=subtree --filter="^.*\.txt"
+    git subproject init my-subproject source --their-prefix=subtree --filter-is-regexp --filter="^.*\.txt"
     
     # Ensure only subtree.txt was pulled
      if [[ ! -f my-subproject/subtree.txt ]]; then
