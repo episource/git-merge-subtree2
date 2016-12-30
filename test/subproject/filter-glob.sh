@@ -10,13 +10,16 @@ TEST_PATTERNS=(
     '*' '**' '***' '**f*' '**/*' '*/**' '*/*' '**.txt' '***.txt' '****.txt' '**/*/*.txt' '*d?r/*.*.txt' '**/d?r*/*/*.txt'
     
     # character groups
-    '*/D?[!0-9]/*.txt' '[^a-z][!a-zA-Z]/*.txt' '**/*.?[][]?' '**/*.?[[]?' '**/*.??[]]' '**/*.?[!]]]' '**/*.?[?'
+    '*/D?[!0-9]/*.txt' '[^a-z][!a-zA-Z]/*.txt' '**/*.?[]' '**/*.?[][]?' '**/*.?[[]?' '**/*.??[]]' '**/*.?[!]]]' '**/*.?[^]]]' '**/*.?[?'
     
     # leading ./ or / & more wildcards
     '/**.txt' '/**/*/*.txt' './**.txt' './**/*/*.txt'
     
     # special characters
-    '.@?!,^$+-()[]{}.txt' '**/*.?()' '**/*.*)*' '**/*.*(*'
+    '.@?!,^$+-()[]{}.txt' '**/*.?()' '**/*.*)*' '**/*.*(*' '[$.^]@.!,[$^*][*$+][-+?][?\-(][)([][[)\]][][{][{\]}][}{\\][\\}|].txt'
+    
+    # escape sequences
+    '[!\\]*' '**/*.[\!\(\)\[\]][\(\)\[\]!][\^\(\)\[\]]' '**/*.\!\(\)' '**/*.\t\x\t' '**/*.?[\]'
 )
 
 function the-test() {
@@ -27,7 +30,7 @@ function the-test() {
     # Initialize source branch
     git checkout --orphan source
     
-    # note: *:? should be avoided for the test to be portable (linux+win)
+    # note: *:?\ should be avoided for the test to be portable (linux+win)
     mkdir subtree
     mkdir subtree/A9
     mkdir subtree/d_r

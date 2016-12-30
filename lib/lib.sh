@@ -56,8 +56,17 @@ function glob-to-regexp() {
     local -n PATTERN_VAR="$1"
     
     local GLOB="$PATTERN_VAR"
+    local GLOB_LEN=${#GLOB}
     local REGEXP=""
 
+    function _get_char() {
+        local -n CHAR_VAR=$1
+        local IDX=$2
+        
+        [[ $IDX -lt $GLOB_LEN ]] \
+            && CHAR_VAR="${GLOB:$IDX:1}" \
+            || CHAR_VAR=""
+    }
     
     function _regexp-escape-char() {
         # escape any of these: .^$*+-?()[]{}\|
@@ -72,12 +81,11 @@ function glob-to-regexp() {
         esac
     }
     
-
-    local GLOB_LEN=${#GLOB}
+    
     local GLOB_IDX=0
+    local CHAR=""
     while [[ $GLOB_IDX -lt $GLOB_LEN ]]; do
-        local CHAR="${GLOB:$GLOB_IDX:1}"
-        (( GLOB_IDX++ ))
+        _get_char "CHAR" GLOB_IDX && (( GLOB_IDX++ ))
         
         case "$CHAR" in
             '*')
@@ -133,46 +141,58 @@ function glob-to-regexp() {
                 # => It points to `pos($CHAR) + 1` which is the first character
                 #    within the character group!
                 local GROUP_IDX=$GLOB_IDX
+                local GROUP_STRING=""
                 
-                # In the following two cases, the first ']' is part of the character
-                # group: '[]]', '[!]]'
+                local NEXT_CHAR=
+                _get_char "NEXT_CHAR" $GROUP_IDX
+                
+                # In the following two cases, the first ']' is part of the
+                # character group: '[]]', '[!]]', '[^]]'
                 # => skip when searching the end of the group
-                [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" == "!" ]] && \
-                    (( GROUP_IDX++ ))
-                [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" == "]" ]] && \
-                    (( GROUP_IDX++ ))
+                if [[ "$NEXT_CHAR" == "!" || "$NEXT_CHAR" == "^" ]]; then
+                    GROUP_STRING+="^"
+                    (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
+                fi
+                if [[ "$NEXT_CHAR" == "]" ]]; then
+                    GROUP_STRING+="$NEXT_CHAR"
+                    (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
+                fi
                 
-                # Search and of character group - lateron $GROUP_IDX points to the
-                # closing character of the group or it is equal to $GLOB_LEN if the
-                # group has not been closed
-                while [[ $GROUP_IDX -lt $GLOB_LEN && "${GLOB:$GROUP_IDX:1}" != "]" ]]; do
-                    ((GROUP_IDX++))
+                # Gather group content until a closing ']' is found
+                while [[ -n "$NEXT_CHAR" && "$NEXT_CHAR" != "]" ]]; do
+                    if [[ "$NEXT_CHAR" == '\' ]]; then
+                        # the escaped character follows
+                        (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
+                        GROUP_STRING+="$( _regexp-escape-char "$NEXT_CHAR" )"
+                    elif [[ "$NEXT_CHAR" == "-" ]]; then
+                        GROUP_STRING+="$NEXT_CHAR"
+                    else
+                        GROUP_STRING+="$( _regexp-escape-char "$NEXT_CHAR" )"
+                    fi
+                    
+                    (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
                 done
-                
-                if [[ $GROUP_IDX -ge $GLOB_LEN ]]; then
+                                   
+                if [[ "$NEXT_CHAR" == "]" ]]; then                                      
+                    # it's a valid character group with closing ']'
+                    # - escapes have already been applied to $GROUP_STRING
+                    GLOB_IDX=$(( $GROUP_IDX + 1 ))
+                    REGEXP+="[$GROUP_STRING]"
+                else
                     # it's not a character group without a closing ']' - escape
                     REGEXP+="\\["
+                fi
+                ;;
+            '\')
+                if [[ $GLOB_IDX -eq $GLOB_LEN ]]; then
+                    REGEXP+="\\"
                 else
-                    local GROUP_COUNT=$(( $GROUP_IDX - $GLOB_IDX ))
-                    local GROUP_CONTENT="${GLOB:$GLOB_IDX:$GROUP_COUNT}"
-                    
-                    # Within a group, the following escapes must be applied
-                    # 1. escape all backslashes
-                    GROUP_CONTENT="${GROUP_CONTENT//\\/\\\\}"
-                    
-                    # 2. group starts with '!' (negation)
-                    [[ "$GROUP_CONTENT" == '!'* ]] && \
-                        GROUP_CONTENT="${GROUP_CONTENT/!/^}"
-                    
-                    # note: group starts with '^' also means negation, which is
-                    # equal to regexp
-                                       
-                    GLOB_IDX=$(( $GROUP_IDX + 1 ))
-                    REGEXP+="[$GROUP_CONTENT]"
+                    REGEXP+="$( _regexp-escape-char "${GLOB:$GLOB_IDX:1}" )"
+                    (( GLOB_IDX++ ))
                 fi
                 ;;
             *)
-                REGEXP+="$( _regexp-escape-char $CHAR )"
+                REGEXP+="$( _regexp-escape-char "$CHAR" )"
                 ;;
         esac
     done
