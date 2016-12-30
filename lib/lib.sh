@@ -87,8 +87,11 @@ function glob-to-regexp() {
                 #       (sub)directories and all files therein
                 #   (3)  ** (in the middle of pattern) match all filenames in
                 #       the current directory and zero or more (sub)directories
-                #       (but not the files in any of the subdirectories)
+                #       (but not the files in any of the subdirectories and not
+                #       a trailing '/')
                 #   (4) **/ match zero or more (sub)directories
+                #   (5) *** (or more) treated like a single star (tested with
+                #       bash 4.3 & 4.4)
                 # Note: ** behaves differently when used at the end of a pattern
                 #       - this is not obvious from the bash reference manual
                 #       (see below) and has been observed while analyzing
@@ -101,23 +104,25 @@ function glob-to-regexp() {
                 #       or more directories and subdirectories. If followed by a
                 #       ‘/’, two adjacent ‘*’s will match only directories and
                 #       subdirectories."
-                if [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "*" ]]; then
+                local STAR_COUNT=1
+                while [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "*" ]]; do
+                    (( STAR_COUNT++ ))
                     (( GLOB_IDX++ ))
-                    
-                    if [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "/" ]]; then
-                        # case (4) above
-                        (( GLOB_IDX++ ))
-                        REGEXP+="(.+/)*"
-                    elif [[ $GLOB_IDX -eq $GLOB_LEN ]]; then
-                        # case (2) above
-                        REGEXP+=".*"
-                    else
-                        # case (3) above
-                        REGEXP+="([^/]*|(.+/)*)"
-                    fi
-                else 
-                    # case (1) above
+                done
+                
+                if [[ $STAR_COUNT -eq 1 || $STAR_COUNT -gt 2 ]]; then
+                    # cases (1)+(5) above
                     REGEXP+="[^/]*"
+                elif [[ $GLOB_IDX -lt $GLOB_LEN && "${GLOB:$GLOB_IDX:1}" == "/" ]]; then
+                    # case (4) above
+                    (( GLOB_IDX++ ))
+                    REGEXP+="(.+/)*"
+                elif [[ $GLOB_IDX -eq $GLOB_LEN ]]; then
+                    # case (2) above
+                    REGEXP+=".*"
+                else
+                    # case (3) above
+                    REGEXP+="([^/]*|.*(?=/))"
                 fi
                 ;;
             '?')

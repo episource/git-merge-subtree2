@@ -5,7 +5,19 @@ SCRIPT_DIR=$( dirname $( readlink -e $0 ) )
 
 
 NL=$'\n'
-TEST_PATTERNS=( '*' '**' '**/*' '*/**' '*/*' '**.txt' '**/*/*.txt' '*/D?[!0-9]/*.txt' '*d?r/*.*.txt' '**/d?r*/*/*.txt' '[^a-z][!a-zA-Z]/*.txt' '.?!,^$+-()[]{}.txt' '/**.txt' '/**/*/*.txt' './**.txt' './**/*/*.txt')
+TEST_PATTERNS=(
+    # wildcards
+    '*' '**' '***' '**f*' '**/*' '*/**' '*/*' '**.txt' '***.txt' '****.txt' '**/*/*.txt' '*d?r/*.*.txt' '**/d?r*/*/*.txt'
+    
+    # character groups
+    '*/D?[!0-9]/*.txt' '[^a-z][!a-zA-Z]/*.txt' '**/*.?[][]?' '**/*.?[[]?' '**/*.??[]]' '**/*.?[!]]]' '**/*.?[?'
+    
+    # leading ./ or / & more wildcards
+    '/**.txt' '/**/*/*.txt' './**.txt' './**/*/*.txt'
+    
+    # special characters
+    '.@?!,^$+-()[]{}.txt' '**/*.?()' '**/*.*)*' '**/*.*(*'
+)
 
 function the-test() {
     # Initialize repo
@@ -15,19 +27,24 @@ function the-test() {
     # Initialize source branch
     git checkout --orphan source
     
+    # note: *:? should be avoided for the test to be portable (linux+win)
     mkdir subtree
     mkdir subtree/A9
     mkdir subtree/d_r
+    mkdir subtree/d-r
+    mkdir subtree/d+r
+    mkdir 'subtree/d*r'
     mkdir subtree/dir
     mkdir subtree/dir.!
     mkdir subtree/dir/DIR
-    echo -n "source branch" > 'subtree/..!,^$+-()[]{}.txt'
+    echo -n "source branch" > 'subtree/.@.!,^$+-()[]{}.txt'
     echo -n "source branch" > subtree/file.txt
     echo -n "source branch" > subtree/.file.bin
     echo -n "source branch" > subtree/A9/file.txt
     echo -n "source branch" > subtree/A9/other.ext    
     echo -n "source branch" > subtree/d_r/file.txt
-    echo -n "source branch" > 'subtree/d_r/strange.!()'
+    echo -n "source branch" > subtree/d-r/strange.\!\(\)
+    echo -n "source branch" > subtree/d+r/strange.\@\(\)
     echo -n "source branch" > subtree/dir/.file.txt
     echo -n "source branch" > subtree/dir/crazy.![]
     echo -n "source branch" > subtree/dir.!/file.txt
@@ -85,11 +102,31 @@ function the-test() {
     
     # Initialize different subprojects with the patterns and compare the result
     # with bash's built-in globbing
+    local AGGREGATED_ERRORS=( )
     for (( i=0; i < ${#TEST_PATTERNS[@]}; i++ )); do
-        git subproject init "filter-test-$i" source --their-prefix=subtree --filter-is-glob --filter="${TEST_PATTERNS[$i]}" || return $?
-        find "filter-test-$i" -type f -printf '%P\n' | sort | diff -y results/$i.txt - || return $?
+        local IS_FAILURE="false"
+    
+        if ! git subproject init "filter-test-$i" source --their-prefix=subtree --filter-is-glob --filter="${TEST_PATTERNS[$i]}" ; then 
+            IS_FAILURE="true"
+        elif ! find "filter-test-$i" -type f -printf '%P\n' | sort | diff -y results/$i.txt - ; then
+            IS_FAILURE="true"
+        fi
+        
+        if [[ $IS_FAILURE == "true" ]]; then
+            AGGREGATED_ERRORS+=( "FAILURE: TEST_PATTERNS[$i] = ${TEST_PATTERNS[$i]}" )
+            ( set +x; echo "${AGGREGATED_ERRORS[-1]}" )
+        fi
     done
     
+    ( 
+        set +x
+        echo "Number of failed test patterns: ${#AGGREGATED_ERRORS[@]}"
+    
+        for ERROR in "${AGGREGATED_ERRORS[@]}"; do
+            echo "    $ERROR"
+        done
+    )
+    return ${#AGGREGATED_ERRORS[@]}  
 }
 
 invoke-test $@
