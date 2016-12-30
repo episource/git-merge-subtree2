@@ -1,7 +1,7 @@
 # Subtree2 merging strategy for git
 **Subtree2** is a merge strategy for git similiar to the [built-in subtree strategy](https://git-scm.com/docs/merge-strategies#_merge_strategies). Additionally, **subtree2** has the ability to merge subdirectories of the source branch, too. Like the default subtree strategy it can also merge to subdirectories of the target branch.
 
-The merge strategy is accompanied by a utility script called **subproject**, that can be used for pulling a subdirectory of a different branch or repository into a subdirectory of the target/current branch. It merges using `--squash`, so that the history does not become cluttered. Source branch and commit are remembered within the merge commit's message to simplify later updates. A subproject can also be merged back into the source branch.
+The merge strategy is accompanied by a custom git command **git subproject**, that can be used for pulling a subdirectory of a different branch or repository into a subdirectory of the target/current branch. It merges like `git merge --squash`, so that the history does not become cluttered. Source branch and commit are remembered within the merge commit's message to simplify later updates. A subproject can also be merged/pushed back into the source branch.
 
 
 ## Comparison with built-in strategies
@@ -31,11 +31,10 @@ Add a working copy of this repository to your path.
 $ git subproject help
 Include another branch or a subdirectory thereof as subdirectory of the
 current branch. By refering to remote branches, other repositories can be
-included as well. Subproject merges using --squash, so that the history does not
-become cluttered. Source branch and commit are remembered within the merge
-commit's message to simplify later updates. A subproject can also be merged back
-into the source branch.
-Note: Subproject uses \`git merge -s subtree2 --squash ...\` for merging.
+included as well. Subproject merges like `git merge --squash`, so that the
+history does not become cluttered. Source branch and commit are remembered
+within the merge commit's message to simplify later updates. A subproject can
+also be merged back into the source branch.
     
 git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>]
 git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--diff3] [--ours|--theirs|--union]
@@ -52,9 +51,9 @@ Init:
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
          message: optional - custom commit message
-          format: optional - pass to \`git log\`'s format option when appending
+          format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
-                  \`--format=\` to suppress the history
+                  `--format=` to suppress the history
 
 Pull:
     Update a subproject by merging changes from the upstream branch.
@@ -75,9 +74,9 @@ Pull:
                   ancestor; this might be necessary when specifying a custom
                   base
          message: optional - custom commit message
-          format: optional - pass to \`git log\`'s format option when appending
+          format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
-                  \`--format=\` to suppress the history
+                  `--format=` to suppress the history
            diff3: optional - show conflicts in "diff3" style, that is the common
                   ancestor's version is included in confict markers
             ours:
@@ -91,10 +90,11 @@ Push:
     
        my-prefix: mandatory - subdirectory containing an existing subproject
          message: optional - custom commit message
-          format: optional - pass to \`git log\`'s format option when appending
+          format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
-                  \`--format=\` to suppress the history
+                  `--format=` to suppress the history
                   
 Continue:
     Continue a pull/push operation after merge conflicts have been resolved.
 ```
+
