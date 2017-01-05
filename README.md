@@ -129,3 +129,9 @@ Continue:
     Continue a pull/push operation after merge conflicts have been resolved.
 ```
 
+## Known issues
+
+- On windows it might be necessary to export `MSYS="noglob"` when dealing with
+  filters containing escaped backslashes (`\\`) together with any of the
+  characters `~?*["'(){}` - see [git-for-windows/git#1019](https://github.com/git-for-windows/git/issues/1019)
+  for details
