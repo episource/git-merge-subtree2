@@ -45,6 +45,8 @@ function fail-if-dirty() {
 # of filename expansions with options 'globstar' and 'dotglob' enabled, as well
 # as 'extglob' disabled - see section 3.5.8 of the bash reference manual for
 # details
+# Features on top of bash:
+#  - multiple wildcard patterns can be "or"-ed together with `|`
 # Features currently not supported:
 #  - predefined character classes ([:alnum:], ...)
 #  - equivalence classes ([=c=], ...)
@@ -57,7 +59,7 @@ function glob-to-regexp() {
     
     local GLOB="$PATTERN_VAR"
     local GLOB_LEN=${#GLOB}
-    local REGEXP=""
+    local REGEXP="^"
 
     function _get_char() {
         local -n CHAR_VAR=$1
@@ -191,13 +193,16 @@ function glob-to-regexp() {
                     (( GLOB_IDX++ ))
                 fi
                 ;;
+            '|')
+                REGEXP+="$|^"
+                ;;
             *)
                 REGEXP+="$( _regexp-escape-char "$CHAR" )"
                 ;;
         esac
     done
 
-    PATTERN_VAR="^$REGEXP$"
+    PATTERN_VAR="$REGEXP$"
 }
 
 # remove leading './' or '/' from filter globstar

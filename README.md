@@ -53,7 +53,7 @@ Init:
           filter: optional - limit merging to the set of files matching the
                   given glob pattern (see --filter-is-glob); the pattern is is
                   matched against the file path relative to the subproject
-                  directory
+                  directory; `\\` is used as escape character
   filter-is-glob: default - interpret --filter as glob pattern, such that
                   subproject mimics bash's behavior of filename expansion with
                   options 'globstar' and 'dotglob' enabled, as well as 'extglob'
@@ -61,7 +61,8 @@ Init:
                   details; the following features are currently not supported,
                   however: predefined character classes ([:alnum:], ...),
                   equivalence classes ([=c=], ...) and matching of collating
-                  symbols ([.symbol.])
+                  symbols ([.symbol.]); in constrast to bash, multiple patterns
+                  can be combined using the pipe `|` symbol using an or-logic
 filter-is-regexp: optional - interpret --filter as perl style regular expression
                   - see `man pcre`
          message: optional - custom commit message
@@ -90,7 +91,7 @@ Pull:
           filter: optional - limit merging to the set of files matching the
                   given glob pattern (see --filter-is-glob); the pattern is is
                   matched against the file path relative to the subproject
-                  directory
+                  directory; `\\` is used as escape character
   filter-is-glob: default - interpret --filter as glob pattern, such that
                   subproject mimics bash's behavior of filename expansion with
                   options 'globstar' and 'dotglob' enabled, as well as 'extglob'
@@ -98,12 +99,13 @@ Pull:
                   details; the following features are currently not supported,
                   however: predefined character classes ([:alnum:], ...),
                   equivalence classes ([=c=], ...) and matching of collating
-                  symbols ([.symbol.])
+                  symbols ([.symbol.]); in constrast to bash, multiple patterns
+                  can be combined using the pipe `|` symbol using an or-logic
 filter-is-regexp: optional - interpret --filter as perl style regular expression
                   - see `man pcre`
      base-filter: optional - like filter, but applied to the base revision,
-                  only; this option can be usefull when explicitly specifying abort
-                  base revision and file names have changed
+                  only; this option can be usefull when explicitly specifying
+                  a base revision and file names have changed
          message: optional - custom commit message
           format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
@@ -132,6 +134,6 @@ Continue:
 ## Known issues
 
 - On windows it might be necessary to export `MSYS="noglob"` when dealing with
-  filters containing escaped backslashes (`\\`) together with any of the
+  filters containing escaped backslashes (`\`) together with any of the
   characters `~?*["'(){}` - see [git-for-windows/git#1019](https://github.com/git-for-windows/git/issues/1019)
   for details
