@@ -1,4 +1,4 @@
-# v0.2.0 (SNAPSHOT)
+# v0.2.0 (2017-01-05)
 - Add a 'filter' argument to select only subproject files for merging, that
   match a given file name/path pattern (the 'filter').
 
