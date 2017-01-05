@@ -4,6 +4,9 @@ SCRIPT_DIR=$( dirname $( readlink -e $0 ) )
 . "$SCRIPT_DIR/../_utils.sh"
 
 
+IS_MSYS=
+[[ "$(uname -a)" == *Msys* ]] && IS_MSYS=true
+
 NL=$'\n'
 TEST_PATTERNS=(
     # wildcards
@@ -22,6 +25,14 @@ TEST_PATTERNS=(
     '[!\\]*' '**/*.[\!\(\)\[\]][\(\)\[\]!][\^\(\)\[\]]' '**/*.\!\(\)' '**/*.\t\x\t' '**/*.?[\]'
 )
 
+# note: *:?\ can't be used on windows
+if [[ -z IS_MSYS ]]; then
+    TEST_PATTERNS+=(
+        'subtree/d[*:?\][^*:?\][^*:?\\]/*.file'
+        'subtree/d\*r\?/:\\.file'
+    )
+fi
+
 function the-test() {
     # Initialize repo
     mkdir -p repo && cd repo
@@ -30,7 +41,7 @@ function the-test() {
     # Initialize source branch
     git checkout --orphan source
     
-    # note: *:?\ should be avoided for the test to be portable (linux+win)
+    
     mkdir subtree
     mkdir subtree/A9
     mkdir subtree/d_r
@@ -40,20 +51,27 @@ function the-test() {
     mkdir subtree/dir
     mkdir subtree/dir.!
     mkdir subtree/dir/DIR
-    echo -n "source branch" > 'subtree/.@.!,^$+-()[]{}.txt'
-    echo -n "source branch" > subtree/file.txt
-    echo -n "source branch" > subtree/.file.bin
-    echo -n "source branch" > subtree/A9/file.txt
-    echo -n "source branch" > subtree/A9/other.ext    
-    echo -n "source branch" > subtree/d_r/file.txt
-    echo -n "source branch" > subtree/d-r/strange.\!\(\)
-    echo -n "source branch" > subtree/d+r/strange.\@\(\)
-    echo -n "source branch" > subtree/dir/.file.txt
-    echo -n "source branch" > subtree/dir/crazy.![]
-    echo -n "source branch" > subtree/dir.!/file.txt
-    echo -n "source branch" > subtree/dir.!/.other.txt
-    echo -n "source branch" > subtree/dir/DIR/.more.txt
-    echo -n "source branch" > subtree/dir/DIR/more.bin
+    
+    local CONTENT="source branch"
+    echo -n $CONTENT > 'subtree/.@.!,^$+-()[]{}.txt'
+    echo -n $CONTENT > subtree/file.txt
+    echo -n $CONTENT > subtree/.file.bin
+    echo -n $CONTENT > subtree/A9/file.txt
+    echo -n $CONTENT > subtree/A9/other.ext    
+    echo -n $CONTENT > subtree/d_r/file.txt
+    echo -n $CONTENT > subtree/d-r/strange.\!\(\)
+    echo -n $CONTENT > subtree/d+r/strange.\@\(\)
+    echo -n $CONTENT > subtree/dir/.file.txt
+    echo -n $CONTENT > subtree/dir/crazy.![]
+    echo -n $CONTENT > subtree/dir.!/file.txt
+    echo -n $CONTENT > subtree/dir.!/.other.txt
+    echo -n $CONTENT > subtree/dir/DIR/.more.txt
+    echo -n $CONTENT > subtree/dir/DIR/more.bin
+    
+    # note: *:?\ can't be used on windows
+    if [[ -z IS_MSYS ]]; then
+        echo -n $CONTENT > 'subtree/d*r?/:\.file'
+    fi
     
     # Calculate expected file sets using bash builtin globbing
     (
