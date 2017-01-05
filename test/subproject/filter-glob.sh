@@ -34,6 +34,11 @@ if [[ -z IS_MSYS ]]; then
 fi
 
 function the-test() {
+    # work around git-for-windows/git#1019
+    # https://github.com/git-for-windows/git/issues/1019
+    export MSYS="noglob"
+    export MSYS_NO_PATHCONV=1
+
     # Initialize repo
     mkdir -p repo && cd repo
     git init
