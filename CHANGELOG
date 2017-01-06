@@ -1,5 +1,8 @@
 # v0.2.1 (SNAPSHOT)
-- Improve performance of commit message generation
+- Include only history of subproject files selected by a given filter in the
+  auto-generated commit message
+- Improve performance of commit message generation (mainly for source branches
+  with lots of files, but restrictive filters)
 
 # v0.2.0 (2017-01-05)
 - Add a 'filter' argument to select only subproject files for merging, that

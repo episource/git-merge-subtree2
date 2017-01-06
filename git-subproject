@@ -216,7 +216,20 @@ function finalize-message() {
             LIMIT=""
         fi
         
-        local HISTORY=$( git log --format="$HISTORY_FORMAT" $REMOTE_BRANCH $LIMIT -- $REMOTE_PREFIX | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
+        local SELECTED_PATHS=( "$REMOTE_PREFIX" )
+        if [[ -n "$FILTER" ]]; then 
+            SELECTED_PATHS=( $( git ls-files --with-tree="$REMOTE_BRANCH" \
+                | sed -e "s/^$REMOTE_PREFIX\///"  \
+                | grep --perl-regexp "$FILTER" ) )
+                
+            if [[ -n "$REMOTE_PREFIX" ]]; then
+                for ((i=0; i<${#SELECTED_PATHS[@]}; i++)); do
+                    SELECTED_PATHS[$i]="$REMOTE_PREFIX/${SELECTED_PATHS[$i]}"
+                done
+            fi
+        fi
+        
+        local HISTORY=$( git log --format="$HISTORY_FORMAT" $REMOTE_BRANCH $LIMIT -- "${SELECTED_PATHS[@]}" | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
         if [[ -n "$HISTORY" ]]; then
             MESSAGE+="$NL$NL$HISTORY"
         fi
