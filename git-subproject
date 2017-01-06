@@ -208,6 +208,10 @@ function finalize-message() {
         [[ -n "$LOCAL_PREFIX" ]] && LOCAL_DESC="$LOCAL_BRANCH:$LOCAL_PREFIX" || LOCAL_DESC="LOCAL_BRANCH:*"
     
         MESSAGE="Merge '$REMOTE_DESC' into '$LOCAL_DESC'"
+        
+        if [[ -n "$FILTER" ]]; then
+            MESSAGE+="$NL(Filter: $FILTER)"
+        fi
     fi
     
     if [[ -n "$HISTORY_FORMAT" ]]; then

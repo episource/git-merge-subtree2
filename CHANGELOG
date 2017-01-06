@@ -3,6 +3,7 @@
   auto-generated commit message
 - Improve performance of subproject merges for for source branches with lots of
   files, but restrictive filters
+- Include filter expression in auto-generated commit messages
 
 # v0.2.0 (2017-01-05)
 - Add a 'filter' argument to select only subproject files for merging, that
