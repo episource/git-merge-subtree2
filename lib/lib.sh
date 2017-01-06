@@ -319,9 +319,11 @@ function prepare-remote-tree() {
     fi
     
     if [[ -n "$FILTER_REGEXP" ]]; then
-        git ls-files -c -- "$LOCAL_PREFIX" | sed -e "s/^$LOCAL_PREFIX\///" \
-            | grep -v --perl-regexp "$FILTER_REGEXP" \
-            | xargs  --replace git rm -rfq --cached "$LOCAL_PREFIX/{}"
+            # note: LOCAL_PREFIX is never empty!
+            git ls-files -c -- "$LOCAL_PREFIX" | sed -e "s/^$LOCAL_PREFIX\///" \
+                | grep -v --perl-regexp "$FILTER_REGEXP" \
+                | sed -e "s/^/$LOCAL_PREFIX\//" \
+                | xargs --no-run-if-empty git rm -rfq --cached --
     fi
         
     REMOTE_TREE_VAR=$(git write-tree)
