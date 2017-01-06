@@ -1,4 +1,4 @@
-# v0.2.1 (SNAPSHOT)
+# v0.2.1 (2017-01-06)
 - Include only history of subproject files selected by a given filter in the
   auto-generated commit message
 - Improve performance of subproject merges for for source branches with lots of
