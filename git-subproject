@@ -42,7 +42,7 @@ function help() {
     >&2 cat << EOF
 Include another branch or a subdirectory thereof as subdirectory of the
 current branch. By refering to remote branches, other repositories can be
-included as well. Subproject merges like `git merge --squash`, so that the
+included as well. Subproject merges like \`git merge --squash\`, so that the
 history does not become cluttered. Source branch and commit are remembered
 within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
