@@ -22,7 +22,7 @@ function the-test() {
     git commit -m "target: initial commit"
 
     # Initialize subproject
-    git subproject init my-subproject source --their-prefix=subtree
+    git subproject init my-subproject source --their-prefix=subtree || return $?
 
     # Update source 
     git checkout source
@@ -37,7 +37,7 @@ function the-test() {
     git commit -m "target: update my-subtree"
 
     # Re-Merge source:subtree
-    git subproject pull my-subproject
+    git subproject pull my-subproject || return $?
 
     # Assert
     diff -c - my-subproject/subtree.txt << EOF

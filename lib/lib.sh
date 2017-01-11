@@ -25,18 +25,18 @@ function fail-if-dirty() {
     local IS_DIRTY=$FALSE
     
     if [[ -n "$(git status --porcelain)" ]]; then
-        >&2 echo "ERROR: Working directory contains untracked files."
+        >&2 echo "FATAL: Working directory contains untracked files."
         IS_DIRTY=$TRUE
     fi
     
     git diff --no-ext-diff --quiet --exit-code
     if [[ $? -ne 0 ]]; then
-        >&2 echo "ERROR: Working directory has local changes."
+        >&2 echo "FATAL: Working directory has local changes."
         IS_DIRTY=$TRUE
     fi
     
     if [[ $IS_DIRTY -eq $TRUE ]]; then
-        >&2 echo "ERROR: Need to stage changes first."
+        >&2 echo "FATAL: Need to stage changes first."
         exit $CRITICAL_EXIT_CODE
     fi
 }
@@ -224,15 +224,21 @@ function normalize-prefix() {
 
 # Validate and resolve the branch/reference name stored in a variable named $1
 # (first argument) to an unambigious name:
-# 1) if the branch starts with "heads/" and "refs/$BRANCH" exists, "heads/" is
+# 1) if the branch name contains "::" it is left unchanged (it's a reference to
+#    a remote repository)
+# 2) if the branch starts with "heads/" and "refs/$BRANCH" exists, "heads/" is
 # stripped from the beginning of the branch name and the result is returned
-# 2) if "refs/heads/$BRANCH" exist, "$BRANCH" is returned unchanged
-# 3) if "refs/remotes/$BRANCH" exists, "remotes/$BRANCH" is returned
-# 4) if "refs/$BRANCH" exists, "$BRANCH" is returned unchanged
+# 3) if "refs/heads/$BRANCH" exist, "$BRANCH" is returned unchanged
+# 4) if "refs/remotes/$BRANCH" exists, "remotes/$BRANCH" is returned
+# 5) if "refs/$BRANCH" exists, "$BRANCH" is returned unchanged
 # Arguments: <branch_var>
 #    <branch_var>: variable storing the branch name to be verified and expanded
 function resolve-branch() {
-    declare -n BRANCH=$1
+    local -n BRANCH=$1
+    
+    if [[ "$BRANCH" == *"::"* ]]; then
+        return 0
+    fi
     
     # The result corresponding to the first matching candidate is returned
     local CANDIDATES=("heads/$BRANCH" "remotes/$BRANCH" "$BRANCH")
@@ -252,7 +258,7 @@ function resolve-branch() {
         RESULTS=( "${RESULTS[@]:1}" )
     done
     
-    >&2 echo "ERROR: Branch not found: $BRANCH"
+    >&2 echo "FATAL: Branch not found: $BRANCH"
     return $CRITICAL_EXIT_CODE
 }
 
@@ -264,37 +270,51 @@ function set-if-zero() {
     fi
 }
 
-# Prepare a tree for merging, such that only files matching a given prefix and
-# filter regexp are considered for merging. 
-# Arguments: <remote_tree_var> <remote_prefix> <local_tree> <local_prefix>
-#   remote_tree_var: name of a variable referencing a tree object or branch
-#                    - the variable is updated to reference the shifted tree
-#                    object
-#     remote_prefix: only files in the tree referenced by <tree_var>, whose paths
-#                    start with <from_prefix> shall be considered for merging
-#        local_tree: name of a the target tree object or branch
-#      local_prefix: the prefix of paths matching <remote_prefix> is changed to
-#                    <local_prefix>
+# Swap contents of variables named $1 and $2.
+function swap-vars() {
+    local -n VAR1=$1
+    local -n VAR2=$2
+    
+    local TMP="$VAR1"
+    VAR1="$VAR2"
+    VAR2="$TMP"
+}
+
+# Prepare a source or base tree for merging, such that only files matching a
+# given prefix and filter regexp are considered for merging. 
+# Arguments: <source_tree_var> <source_prefix> <target_tree> <target_prefix> <filter_regexp>
+#   source_tree_var: name of a variable referencing a source/base tree object or
+#                    branch - the variable is updated to reference the shifted
+#                    tree object
+#     source_prefix: only files in the tree referenced by <source_tree_var>,
+#                    whose paths starts with <source_prefix> shall be considered
+#                    for merging
+#       target_tree: name of a the target tree object or branch
+#     target_prefix: within the tree referenced by <source_tree_var>, the prefix
+#                    directory <source_prefix> is renamed to <target_prefix>
+#     filter_regexp: consider only files from source tree whose relative paths
+#                    match this filter expression (pcre)
 #
-# The resulting treeish contains files from from <tree_var> and <my_tree>:
-#   - files from <local_tree> not matching <local_prefix>/*
-#   - files from <remote_tree> matching <remote_prefix>/* and <filter_regex> 
-#     with <remote_prefix> changed to <local_prefix>
+# The resulting treeish contains files from from the tree referenced by
+# <source_tree_var> and <target_tree>:
+#   - files from <target_tree> not matching <target_prefix>/*
+#   - files from <source_tree(_var)> matching <source_prefix>/* and
+#     <filter_regex>  with <source_prefix> changed to <target_prefix>
 function prepare-remote-tree() {
-    local -n REMOTE_TREE_VAR=$1
-    local REMOTE_PREFIX=$2
-    local LOCAL_TREE=$3
-    local LOCAL_PREFIX=$4
+    local -n SOURCE_TREE_VAR=$1
+    local SOURCE_PREFIX=$2
+    local TARGET_TREE=$3
+    local TARGET_PREFIX=$4
     local FILTER_REGEXP=$5
 
-    local FROM_TREE="$REMOTE_TREE_VAR"
+    local FROM_TREE="$SOURCE_TREE_VAR"
     
     # if specified, extract the tree object corresponding to $REMOTE_PREFIX
-    if [[ -n "$REMOTE_PREFIX" ]]; then
-        LS_TREE_RESULT=( $(git ls-tree -rd "$REMOTE_TREE_VAR" | grep --perl-regexp "\t$REMOTE_PREFIX$" --max-count 1) )
+    if [[ -n "$SOURCE_PREFIX" ]]; then
+        LS_TREE_RESULT=( $(git ls-tree -rd "$SOURCE_TREE_VAR" | grep --perl-regexp "\t$SOURCE_PREFIX$" --max-count 1) )
         
         if [[ -z ${LS_TREE_RESULT[@]} ]]; then
-            >&2 echo "'$REMOTE_TREE_VAR' does not include a directory '$REMOTE_PREFIX'"
+            >&2 echo "'$SOURCE_TREE_VAR' does not include a directory '$SOURCE_PREFIX'"
             return 2
         fi
         
@@ -302,45 +322,47 @@ function prepare-remote-tree() {
     fi
     
     # use the index to prepare their tree
-    if [[ -z "$LOCAL_PREFIX" ]]; then
-        # the merge is not limited to a sub directory ($LOCAL_PREFIX) of
-        # $LOCAL_TREE, hence there are no files outside $LOCAL_PREFIX to
+    if [[ -z "$TARGET_PREFIX" ]]; then
+        # the merge is not limited to a sub directory ($TARGET_PREFIX) of
+        # $TARGET_TREE, hence there are no files outside $TARGET_PREFIX to
         # preserve => prepare $FROM_TREE starting with an empty index
         git read-tree --empty
         git read-tree "$FROM_TREE"
     else 
-        # the merge is limited to a sub directory ($LOCAL_PREFIX) of $MY_TREE,
-        # hence there are files outside $LOCAL_PREFIX to preserve
-        # => initialize $FROM_TREE using $LOCAL_TREE and replace everything below
-        #    $LOCAL_PREFIX
-        git reset --mixed "$LOCAL_TREE"
-        git rm -q --cached "$LOCAL_PREFIX/*" &> /dev/null
-        git read-tree --prefix="$LOCAL_PREFIX" "$FROM_TREE"
+        # the merge is limited to a sub directory ($TARGET_PREFIX) of 
+        # $TARGET_TREE, hence there are files outside $TARGET_PREFIX to preserve
+        # => initialize $FROM_TREE using $TARGET_TREE and replace everything
+        #    below $TARGET_PREFIX
+        git reset --mixed "$TARGET_TREE"
+        git rm -q --cached "$TARGET_PREFIX/*" &> /dev/null
+        git read-tree --prefix="$TARGET_PREFIX" "$FROM_TREE"
     fi
     
     if [[ -n "$FILTER_REGEXP" ]]; then
-            # note: LOCAL_PREFIX is never empty!
-            git ls-files -c -- "$LOCAL_PREFIX" | sed -e "s/^$LOCAL_PREFIX\///" \
+            # note: TARGET_PREFIX is never empty!
+            git ls-files -c -- "$TARGET_PREFIX" | sed -e "s/^$TARGET_PREFIX\///" \
                 | grep -v --perl-regexp "$FILTER_REGEXP" \
-                | sed -e "s/^/$LOCAL_PREFIX\//" \
+                | sed -e "s/^/$TARGET_PREFIX\//" \
                 | xargs --no-run-if-empty git rm -rfq --cached --
     fi
         
-    REMOTE_TREE_VAR=$(git write-tree)
+    SOURCE_TREE_VAR=$(git write-tree)
 }
 
 # A merge strategy like built-in resolve.
 # Based on https://github.com/git/git/blob/master/git-merge-resolve.sh
-# Arguments: <local_tree> <remote_tree> <base_tree>
+# Arguments: <base_tree> <target_tree> <source_tree>
 #  xxx_tree: id of a tree object to merge
+# Variables: MERGE_FILE_CONFLICT_STYLE, MERGE_FILE_MODE
 function merge-resolve() {
-    local LOCAL_TREE="$1"
-    local REMOTE_TREE="$2"
-    local BASE_TREE="$3"
+    local BASE_TREE="$1"
+    local TARGET_TREE="$2"
+    local SOURCE_TREE="$3"
     
     # Update index to match working directory, then merge trees
     git reset --mixed 
-    git read-tree -m -u --aggressive $BASE_TREE $LOCAL_TREE $REMOTE_TREE || return $CRITICAL_EXIT_CODE
+    git read-tree -m -u --aggressive $BASE_TREE $TARGET_TREE $SOURCE_TREE \
+        || return $CRITICAL_EXIT_CODE
 
     # Read-tree does a simple merge, that might leave unresolved files behind
     # Using 'git write-tree' it is easy to test for unresolved files.

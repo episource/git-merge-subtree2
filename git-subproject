@@ -10,29 +10,55 @@ PULL_MARKER="git-subproject-pull:"
 PUSH_MARKER="git-subproject-push:"
 
 #
-# Input Variables
-THEIR_BRANCH=
-MY_PREFIX=
-THEIR_PREFIX=
-BASE_PREFIX=
-FILTER=
-BASE_FILTER=
-FILTER_MODE="glob"
-MESSAGE=
-HISTORY_FORMAT="medium"
-MERGE_FILE_CONFLICT_STYLE=""
-MERGE_FILE_MODE=""
+# Input Variables (set in "stage 1 - read arguments" or "stage 2 - preparation")
+IN_MODE=
+IN_THEIR_BRANCH=
+IN_MY_PREFIX=
+IN_THEIR_PREFIX=
+IN_BASE_PREFIX=
+IN_FILTER=
+IN_BASE_FILTER=
+IN_FILTER_MODE="glob"
+IN_MESSAGE=
+IN_HISTORY_FORMAT="medium"
+IN_MERGE_FILE_CONFLICT_STYLE=""
+IN_MERGE_FILE_MODE=""
 
 #
 # Context Variables
-LAST_PULL_MY_REV=
-LAST_PULL_MY_PREFIX=
-LAST_PULL_THEIR_REV=
-LAST_PULL_THEIR_PREFIX=
-LAST_PUSH_MY_REV=
-LAST_PUSH_MY_PREFIX=
-LAST_PUSH_THEIR_REV=
-LAST_PUSH_THEIR_PREFIX=
+
+## Set in "stage 2 - preparation"
+## Note: SOURCE and TARGET are relative to the merge direction where as MY and
+##       THEIR always match the user input
+##       during PULL/INIT: SOURCE - my branch   ; TARGET - their branch
+##       during PUSH     : Source - their branch; TARGET - my branch
+C_MARKER="$PULL_MARKER"   # Either $PULL_MARKER or $PUSH_MARKER - used to format
+                          # commit message 
+C_SOURCE_BRANCH_SPEC=     # Source branch (foreign branch reference unresolved)
+C_SOURCE_BRANCH=          # Source branch (foreign branch reference resolved)
+C_SOURCE_BRANCH_PREFIX=   # Source branch's prefix directory - may be empty
+C_TARGET_BRANCH_SPEC=     # Target branch (foreign branch reference unresolved)
+C_TARGET_BRANCH=          # Target branch (foreign branch reference resolved)
+C_TARGET_BRANCH_PREFIX=   # Target branch's prefix directory - never empty
+C_BASE_REV=               # Base revision - default is "empty tree"
+C_BASE_PREFIX=            # Prefix for base revision
+C_MESSAGE=                # The final commit message
+C_SOURCE_HISTORY_OFFSET=  # When autogenerating the merge commit message,
+                          # include all commit messages from the tip of the
+                          # source branch back (exclusive) to this revision
+                          # Note: Ignored if empty or "empty tree".
+C_LAST_PUSH_MY_REV=       # The last revision of my branch, that has been pushed
+C_LAST_KNOWN_THEIR_REV=   # Changes up to and including this revision of their
+                          # branch have been merged into my branch (not
+                          # considering changes, that have been reverted): If the
+                          # last operation was pulling, this is the revision of
+                          # their branch, that has been pulled last. Else, if
+                          # the operation was pushing, this is the revision of
+                          # the associated merge commit created on their branch
+                          # (subproject requires their branch to be unchanged
+                          # when pushing, which leads to my branch and their
+                          # branch being equal after a push operation)
+
 
 
 #
@@ -153,206 +179,7 @@ EOF
 #
 # Functions
 
-# Commit the merged working directory or save the current script state to be
-# picked up by `git subproject continue` and abort with exit code
-# $CAN_CONTINUE_EXIT_CODE.
-function commit() {
-    if ! git diff --no-ext-diff --quiet --exit-code --diff-filter=U; then
-        >&2 echo "ERROR: Committing is not possible because you have unmerged files."
-        >&2 echo "HINT: Fix them up in the work tree, and then use 'git add/rm <file>'"
-        >&2 echo "HINT: as appropriate to mark resolution. Finally continue with"
-        >&2 echo "HINT: \`git subproject continue\`."
-        
-        echo "STATE_REV=$(git rev-list HEAD -1)" > "$STATE_FILE"
-        
-        local STATE_VARS=( "BASE_PREFIX" "HISTORY_FORMAT" "LAST_PULL_MY_REV" "LAST_PULL_THEIR_PREFIX" "LAST_PULL_THEIR_REV" "LAST_PUSH_MY_REV" "LAST_PUSH_THEIR_PREFIX" "LAST_PUSH_THEIR_REV"  "MESSAGE" "MY_BRANCH" "MY_PREFIX" "THEIR_BRANCH" "THEIR_PREFIX")
-        for var in "${STATE_VARS[@]}"; do
-            declare -p $var >> "$STATE_FILE"
-        done
-        
-        exit $CAN_CONTINUE_EXIT_CODE
-    fi
-
-    git commit -m "$MESSAGE"
-}
-
-# Add history and subproject markers to the commit message $MESSAGE. A default
-# message is created when $MESSAGE is empty.
-# Arguments: <marker> <my_branch> <my_prefix> <their_prefix> <last_known_their_rev>
-#           <marker>: indicates that the commit is a subproject commit (example:
-#                     git-subproject-pull)
-#     <local_branch>: target branch
-#     <local_prefix>: target branch prefix (subdirectory)
-#    <remote_branch>: source branch
-#    <remote_prefix>: source branch prefix (subdirectory)
-#    <last_known_their_rev>: log messages from this revision up to the tip of
-#                     their_branch are included in the commit message; if
-#                     unspecified the full history is considered; the history
-#                     format is taken from $HISTORY_FORMAT
-function finalize-message() {
-    local MARKER="$1"
-    local LOCAL_BRANCH="$2"
-    local LOCAL_PREFIX="$3"
-    local REMOTE_BRANCH="$4"
-    local REMOTE_PREFIX="$5"
-    local LAST_KNOWN_REMOTE_REV="$6"
-
-    local REMOTE_REV=$( git rev-parse $REMOTE_BRANCH )
-    local MARKER_LINE="$MARKER -Xmy-prefix=\"$LOCAL_PREFIX\" -Xtheir-branch=\"$REMOTE_BRANCH\" -Xtheir-prefix=\"$REMOTE_PREFIX\" -Xtheir-rev=\"$REMOTE_REV\" -Xfilter=\"$FILTER\""
-    
-    if [[ -z "$MESSAGE" ]]; then
-        local REMOTE_DESC=
-        [[ -n "$REMOTE_PREFIX" ]] && REMOTE_DESC="$REMOTE_BRANCH:$REMOTE_PREFIX" || REMOTE_DESC="$REMOTE_BRANCH:*"
-        
-        local LOCAL_DESC=
-        [[ -n "$LOCAL_PREFIX" ]] && LOCAL_DESC="$LOCAL_BRANCH:$LOCAL_PREFIX" || LOCAL_DESC="LOCAL_BRANCH:*"
-    
-        MESSAGE="Merge '$REMOTE_DESC' into '$LOCAL_DESC'"
-        
-        if [[ -n "$FILTER" ]]; then
-            MESSAGE+="$NL(Filter: $FILTER)"
-        fi
-    fi
-    
-    if [[ -n "$HISTORY_FORMAT" ]]; then
-        local LIMIT="^$LAST_KNOWN_REMOTE_REV"
-        if [[ -z "$LAST_KNOWN_REMOTE_REV" || "$LAST_KNOWN_REMOTE_REV" == "$EMPTY_TREE" ]]; then
-            LIMIT=""
-        fi
-        
-        local SELECTED_PATHS=( "$REMOTE_PREFIX" )
-        if [[ -n "$FILTER" ]]; then 
-            SELECTED_PATHS=( $( git ls-files --with-tree="$REMOTE_BRANCH" \
-                | sed -e "s/^$REMOTE_PREFIX\///"  \
-                | grep --perl-regexp "$FILTER" ) )
-                
-            if [[ -n "$REMOTE_PREFIX" ]]; then
-                for ((i=0; i<${#SELECTED_PATHS[@]}; i++)); do
-                    SELECTED_PATHS[$i]="$REMOTE_PREFIX/${SELECTED_PATHS[$i]}"
-                done
-            fi
-        fi
-        
-        local HISTORY=$( git log --format="$HISTORY_FORMAT" $REMOTE_BRANCH $LIMIT -- "${SELECTED_PATHS[@]}" | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
-        if [[ -n "$HISTORY" ]]; then
-            MESSAGE+="$NL$NL$HISTORY"
-        fi
-    fi
-    
-    MESSAGE+="$NL$NL$MARKER_LINE"
-}
-
-# Parse history to figure out context variables: subproject commits are marked
-# with either $PUSH_MARKERs or $PULL_MARKERs
-function get-context() {
-    if [[ ! -d "$MY_PREFIX" ]]; then
-        >&2 echo "ERROR: Prefix directory '$MY_PREFIX' not found."
-        return $CRITICAL_EXIT_CODE
-    fi
-
-    LAST_PULL_MY_REV=$( git rev-list -1 --first-parent "--grep=^$PULL_MARKER.*-Xmy-prefix=\"$MY_PREFIX\"" HEAD )
-    if [[ -z "$LAST_PULL_MY_REV" ]]; then
-        >&2 echo "ERROR: Subproject $MY_PREFIX not found."
-        return $CRITICAL_EXIT_CODE
-    fi
-    
-    local MY_CONFIG=$( git log -1 --format=%s%n%b $LAST_PULL_MY_REV | grep "^$PULL_MARKER" | sed -e "s/^$PULL_MARKER\s*//" )
-    for opt in $MY_CONFIG; do
-        local VAL=$( echo "${opt##*=}" | xargs )
-        case "$opt" in
-            -Xmy-prefix=*)
-                LAST_PULL_MY_PREFIX="$VAL"
-                ;;
-            -Xtheir-prefix=*)
-                set-if-zero "THEIR_PREFIX" "$VAL"
-                LAST_PULL_THEIR_PREFIX="$VAL"
-                ;;
-            -Xtheir-branch=*)
-                set-if-zero "THEIR_BRANCH" "$VAL"
-                ;;
-            -Xtheir-rev=*)
-                LAST_PULL_THEIR_REV="$VAL"
-                ;;
-            -Xfilter=*)
-                if [[ -z "$FILTER" ]]; then
-                    FILTER="$VAL"
-                fi
-                if [[ -z "$BASE_FILTER" ]]; then
-                    BASE_FILTER="$VAL"
-                fi
-                ;;
-        esac
-    done
-    
-    resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
-    LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $THEIR_BRANCH --not $BASE )
-    if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
-        local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
-        
-        for opt in $THEIR_CONFIG; do
-            local VAL=$( echo "${opt##*=}" | xargs )
-            case "$opt" in
-                -Xtheir-rev=*)
-                    LAST_PUSH_MY_REV="$VAL"
-                    ;;
-                -Xtheir-prefix=*)
-                    LAST_PUSH_MY_PREFIX="$VAL"
-                    ;;
-                -Xmy-prefix=*)
-                    LAST_PUSH_THEIR_PREFIX="$VAL"
-                    ;;
-                *);;
-            esac
-        done
-    fi
-}
-
-# Merge like subtree2 strategy
-function merge() {
-    local LOCAL_BRANCH="$1"
-    local LOCAL_PREFIX="$2"
-    local REMOTE_BRANCH="$3"
-    local REMOTE_PREFIX="$4"
-    local BASE_REV="$5"
-    local BASE_PREFIX="$6"
-    
-    local ACTUAL_BASE_FILTER="${BASE_FILTER:-$FILTER}"
-    
-    # do the merge
-    prepare-remote-tree "BASE_REV" "$BASE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$ACTUAL_BASE_FILTER" || return $?
-    prepare-remote-tree "REMOTE_BRANCH" "$REMOTE_PREFIX" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$FILTER" || return $?
-    merge-resolve "$LOCAL_BRANCH" "$REMOTE_BRANCH" "$BASE_REV" || return $?
-       
-    if [[ -z "$(git status --porcelain)" ]]; then
-        >&2 echo "ERROR: No changes to pull/push."
-        return $CRITICAL_EXIT_CODE
-    fi
-}
-
-# Merge and commit the merged working directory -or- when in case of remaining
-# conflicts, save the current script stateto be picked up by 
-#`git subproject continue` and abort with exit code $CAN_CONTINUE_EXIT_CODE.
-function merge-and-commit() {
-    local MARKER="$1"
-    local LOCAL_BRANCH="$2"
-    local LOCAL_PREFIX="$3"
-    local REMOTE_BRANCH="$4"
-    local REMOTE_PREFIX="$5"
-    local BASE_REV="$6"
-    local BASE_PREFIX="$7"
-    local LAST_KNOWN_THEIR_REV="$8"
-    
-    finalize-message "$MARKER" "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$REMOTE_BRANCH" "$REMOTE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
-    
-    merge "$LOCAL_BRANCH" "$LOCAL_PREFIX" "$REMOTE_BRANCH" "$REMOTE_PREFIX" "$BASE_REV" "$BASE_PREFIX"
-    local MERGE_RESULT=$?
-    
-    if [[ $MERGE_RESULT -ne $CRITICAL_EXIT_CODE ]]; then
-        commit
-    else
-        return $MERGE_RESULT
-    fi
-}
+## 1. Read arguments
 
 # Read command line arguments
 function read-arguments() {
@@ -378,12 +205,12 @@ function read-arguments() {
     fi
 
     # check mode
-    MODE="$1"
-    case "$MODE" in
+    IN_MODE="$1"
+    case "$IN_MODE" in
         init|pull|push)
             [[ $# -lt 2 ]] && help
-            MY_PREFIX="$2"
-            normalize-prefix "MY_PREFIX"
+            IN_MY_PREFIX="$2"
+            normalize-prefix "IN_MY_PREFIX"
             shift 2
             ;;
         continue)
@@ -396,11 +223,11 @@ function read-arguments() {
     esac
     
     # select argument set
-    ALLOWED_ARGS="${MODE^^}_ARGS"
+    ALLOWED_ARGS="${IN_MODE^^}_ARGS"
 
     # treat THEIR_BRANCH special if in mode `init`
-    if [[ "$MODE" == "init" && "$1" != --* ]]; then
-        THEIR_BRANCH="$1"
+    if [[ "$IN_MODE" == "init" && "$1" != --* ]]; then
+        IN_THEIR_BRANCH="$1"
         shift
     fi
 
@@ -412,52 +239,52 @@ function read-arguments() {
         
         case "$1" in
             --base=*)
-                BASE="$VAL"
+                IN_BASE="$VAL"
                 ;;
             --base-filter=*)
-                BASE_FILTER="$VAL"
+                IN_BASE_FILTER="$VAL"
                 ;;
             --base-prefix=*)
-                BASE_PREFIX="$VAL"
-                normalize-prefix "BASE_PREFIX"
+                IN_BASE_PREFIX="$VAL"
+                normalize-prefix "IN_BASE_PREFIX"
                 ;;
             --diff3)
-                MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
+                IN_MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
                 ;;
             --filter=*)
-                FILTER="$VAL"
+                IN_FILTER="$VAL"
                 ;;
             --filter-is-regexp)
-                FILTER_MODE="regexp"
+                IN_FILTER_MODE="regexp"
                 ;;
             --filter-is-glob)
-                FILTER_MODE="glob"
+                IN_FILTER_MODE="glob"
                 ;;
             --format=*)
-                HISTORY_FORMAT="$VAL"
+                IN_HISTORY_FORMAT="$VAL"
                 ;;
             -m)
-                MESSAGE=$2
+                IN_MESSAGE="$2"
                 shift
                 ;;
             --message=*)
-                MESSAGE="$VAL"
+                IN_MESSAGE="$VAL"
                 ;;
             --ours)
-                MERGE_FILE_MODE="-Xours"
+                IN_MERGE_FILE_MODE="-Xours"
                 ;;
             --theirs)
-                MERGE_FILE_MODE="-Xtheirs"
+                IN_MERGE_FILE_MODE="-Xtheirs"
                 ;;
             --their-branch=*)
-                THEIR_BRANCH="$VAL"
+                IN_THEIR_BRANCH="$VAL"
                 ;;
             --their-prefix=*)
-                THEIR_PREFIX="$VAL"
-                normalize-prefix "THEIR_PREFIX"
+                IN_THEIR_PREFIX="$VAL"
+                normalize-prefix "IN_THEIR_PREFIX"
                 ;;
             --union)
-                MERGE_FILE_MODE="-Xunion"
+                IN_MERGE_FILE_MODE="-Xunion"
                 ;;
             *)
                 help
@@ -466,19 +293,262 @@ function read-arguments() {
         shift # past argument or value
     done
 
-    [[ "$MODE" == "continue" || -n "$MY_PREFIX" ]] || help
+    [[ "$IN_MODE" == "continue" || -n "$IN_MY_PREFIX" ]] || help
     
-    if [[ "$FILTER_MODE" == "glob" ]]; then
-        if [[ -n ${FILTER:+x} ]]; then
-            normalize-glob "FILTER"
-            glob-to-regexp "FILTER"
+    if [[ "$IN_FILTER_MODE" == "glob" ]]; then
+        if [[ -n ${IN_FILTER:+x} ]]; then
+            normalize-glob "IN_FILTER"
+            glob-to-regexp "IN_FILTER"
         fi
         
-        if [[ -n ${BASE_FILTER:+x} ]]; then
-            normalize-glob "BASE_FILTER"
-            glob-to-regexp "BASE_FILTER"
+        if [[ -n ${IN_BASE_FILTER:+x} ]]; then
+            normalize-glob "IN_BASE_FILTER"
+            glob-to-regexp "IN_BASE_FILTER"
         fi
     fi
+}
+
+## 2. Preparation
+
+# Parse history to figure out context variables: subproject commits are marked
+# with either $PUSH_MARKERs or $PULL_MARKERs.
+# Initializes all context variables accept C_MARKER and C_MESSAGE to defaults
+# suitable for pulling from their branch.
+function get-context() {
+    local LAST_PULL_MY_REV=
+    local LAST_PULL_MY_PREFIX=
+    local LAST_PULL_THEIR_REV=
+    local LAST_PULL_THEIR_PREFIX=
+    local LAST_PUSH_MY_REV=
+    local LAST_PUSH_MY_PREFIX=
+    local LAST_PUSH_THEIR_REV=
+    local LAST_PUSH_THEIR_PREFIX=
+    
+    if [[ ! -d "$IN_MY_PREFIX" ]]; then
+        >&2 echo "FATAL: Prefix directory '$IN_MY_PREFIX' not found."
+        return $CRITICAL_EXIT_CODE
+    fi
+
+    
+    #
+    # Parse my history
+    local LAST_PULL_MY_REV=$( git rev-list -1 --first-parent "--grep=^$PULL_MARKER.*-Xmy-prefix=\"$IN_MY_PREFIX\"" HEAD )
+    if [[ -z "$LAST_PULL_MY_REV" ]]; then
+        >&2 echo "FATAL: Subproject $IN_MY_PREFIX not found."
+        return $CRITICAL_EXIT_CODE
+    fi
+    
+    local MY_CONFIG=$( git log -1 --format=%s%n%b $LAST_PULL_MY_REV | grep "^$PULL_MARKER" | sed -e "s/^$PULL_MARKER\s*//" )
+    for opt in $MY_CONFIG; do
+        local VAL=$( echo "${opt##*=}" | xargs )
+        case "$opt" in
+            -Xmy-prefix=*)
+                LAST_PULL_MY_PREFIX="$VAL"
+                ;;
+            -Xtheir-prefix=*)
+                set-if-zero "IN_THEIR_PREFIX" "$VAL"
+                LAST_PULL_THEIR_PREFIX="$VAL"
+                ;;
+            -Xtheir-branch=*)
+                set-if-zero "IN_THEIR_BRANCH" "$VAL"
+                ;;
+            -Xtheir-rev=*)
+                LAST_PULL_THEIR_REV="$VAL"
+                ;;
+            -Xfilter=*)
+                if [[ -z "$IN_FILTER" ]]; then
+                    IN_FILTER="$VAL"
+                fi
+                if [[ -z "$IN_BASE_FILTER" ]]; then
+                    IN_BASE_FILTER="$VAL"
+                fi
+                ;;
+        esac
+    done
+    
+    
+    #
+    ## Resolve source & target branch
+    C_SOURCE_BRANCH_SPEC="$IN_THEIR_BRANCH"
+    C_SOURCE_BRANCH_PREFIX="$IN_THEIR_PREFIX"
+    C_TARGET_BRANCH_SPEC="$MY_BRANCH"
+    C_TARGET_BRANCH_PREFIX="$IN_MY_PREFIX"
+    
+    # no need to resolve my branch: no user input
+    resolve-branch "C_SOURCE_BRANCH_SPEC" || return $?
+    C_SOURCE_BRANCH="$C_SOURCE_BRANCH_SPEC"
+    C_TARGET_BRANCH="$C_TARGET_BRANCH_SPEC"
+    
+    
+    #
+    # Parse their history
+    local LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$IN_MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $C_SOURCE_BRANCH --not $IN_BASE )
+    if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
+        local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
+        
+        for opt in $THEIR_CONFIG; do
+            local VAL=$( echo "${opt##*=}" | xargs )
+            case "$opt" in
+                -Xtheir-rev=*)
+                    LAST_PUSH_MY_REV="$VAL"
+                    ;;
+                -Xtheir-prefix=*)
+                    LAST_PUSH_MY_PREFIX="$VAL"
+                    ;;
+                -Xmy-prefix=*)
+                    LAST_PUSH_THEIR_PREFIX="$VAL"
+                    ;;
+                *);;
+            esac
+        done
+    fi
+    
+    
+    #
+    # Determine base & base prefix
+    # + info about most recent operations
+    
+    C_LAST_PUSH_MY_REV="$LAST_PUSH_MY_REV"
+    C_BASE_REV="$IN_BASE"
+    C_BASE_PREFIX="$IN_BASE_PREFIX"
+    
+    # The first applicable option is chosen - base prefix is determined exactly
+    # the same:
+    # 1. explicit IN_BASE given by user
+    # - else use the newest common ancestor, that is -
+    # 2. LAST_PUSH_MY_REV is newer than LAST_PULL_MY_REV: use LAST_PUSH_MY_REV
+    # 3. use LAST_PULL_THEIR_REV
+    if [[ -n $LAST_PUSH_MY_REV && ( $LAST_PUSH_MY_REV == $LAST_PULL_MY_REV || -n $( git rev-list --first-parent $LAST_PULL_MY_REV..$LAST_PUSH_MY_REV ) ) ]]; then
+        # last PUSH is newer than last PULL
+        set-if-zero "C_BASE_REV" "$LAST_PUSH_MY_REV"
+        set-if-zero "C_BASE_PREFIX" "$LAST_PUSH_MY_PREFIX"
+        C_LAST_KNOWN_THEIR_REV="$LAST_PUSH_THEIR_REV"
+    else
+        # last PULL is newest
+        set-if-zero "C_BASE_REV" "$LAST_PULL_THEIR_REV"
+        set-if-zero "C_BASE_PREFIX" "$LAST_PULL_THEIR_PREFIX"
+        C_LAST_KNOWN_THEIR_REV="$LAST_PULL_THEIR_REV"
+    fi
+    
+    C_SOURCE_HISTORY_OFFSET="$C_LAST_KNOWN_THEIR_REV"
+}
+
+# Build the commit message $C_MESSAGE. The message a pull or push marker and
+# either a user defined $IN_MESSAGE or the source branch's history from
+# $C_LAST_KNOWN_SOURCE_REV up to the tip of the branch. If
+# $C_LAST_KNOWN_SOURCE_REV is empty or "empty tree", the full history is
+# considered. The history format is taken from $IN_HISTORY_FORMAT.
+function finalize-message() {
+    local SOURCE_REV=$( git rev-parse $C_SOURCE_BRANCH )
+    local MARKER_LINE="$C_MARKER -Xmy-prefix=\"$C_TARGET_BRANCH_PREFIX\" -Xtheir-branch=\"$C_SOURCE_BRANCH_SPEC\" -Xtheir-prefix=\"$C_SOURCE_BRANCH_PREFIX\" -Xtheir-rev=\"$SOURCE_REV\" -Xfilter=\"$IN_FILTER\""
+    
+    C_MESSAGE="$IN_MESSAGE"
+    if [[ -z "$C_MESSAGE" ]]; then
+        local SOURCE_DESC=
+        [[ -n "$C_SOURCE_BRANCH_PREFIX" ]] \
+            && SOURCE_DESC="$C_SOURCE_BRANCH_SPEC:$C_SOURCE_BRANCH_PREFIX" \
+            || SOURCE_DESC="$C_SOURCE_BRANCH_SPEC:*"
+        
+        local TARGET_DESC=
+        [[ -n "$C_TARGET_BRANCH_PREFIX" ]] \
+            && TARGET_DESC="$C_TARGET_BRANCH_SPEC:$C_TARGET_BRANCH_PREFIX" \
+            || TARGET_DESC="C_TARGET_BRANCH_SPEC:*"
+    
+        C_MESSAGE="Merge '$SOURCE_DESC' into '$TARGET_DESC'"
+        
+        if [[ -n "$IN_FILTER" ]]; then
+            C_MESSAGE+="$NL(Filter: $IN_FILTER)"
+        fi
+    fi
+    
+    if [[ -n "$IN_HISTORY_FORMAT" ]]; then
+        local LIMIT=""
+        if [[ -n "$C_SOURCE_HISTORY_OFFSET" ]]; then
+            LIMIT="^$C_SOURCE_HISTORY_OFFSET"
+        fi
+        
+        local SELECTED_PATHS=( "${C_SOURCE_BRANCH_PREFIX:-.}" )
+        if [[ -n "$IN_FILTER" ]]; then 
+            SELECTED_PATHS=( $( git ls-files --with-tree="$C_SOURCE_BRANCH" \
+                | sed -e "s/^$C_SOURCE_BRANCH_PREFIX\///"  \
+                | grep --perl-regexp "$IN_FILTER" ) )
+                
+            if [[ -n "$REMOTE_PREFIX" ]]; then
+                for ((i=0; i<${#SELECTED_PATHS[@]}; i++)); do
+                    SELECTED_PATHS[$i]=\
+                        "$C_SOURCE_BRANCH_PREFIX/${SELECTED_PATHS[$i]}"
+                done
+            fi
+        fi
+        
+        local HISTORY=$( git log --format="$IN_HISTORY_FORMAT" $C_SOURCE_BRANCH $LIMIT -- "${SELECTED_PATHS[@]}" | grep -v -E "^\s*($PULL_MARKER|$PUSH_MARKER)" )
+        if [[ -n "$HISTORY" ]]; then
+            C_MESSAGE+="$NL$NL$HISTORY"
+        fi
+    fi
+    
+    C_MESSAGE+="$NL$NL$MARKER_LINE"
+}
+
+# 3. Merge & commit
+
+# Merge and commit the merged working directory -or- when in case of remaining
+# conflicts, save the current script state to be picked up by 
+#`git subproject continue` and abort with exit code $CAN_CONTINUE_EXIT_CODE.
+function merge-and-commit() {
+    merge
+    local MERGE_RESULT=$?
+    
+    if [[ $MERGE_RESULT -ne $CRITICAL_EXIT_CODE ]]; then
+        commit || return $(( $? > $MERGE_RESULT ? $? : $MERGE_RESULT ))
+    else
+        return $MERGE_RESULT
+    fi
+}
+
+# Merge like subtree2 strategy
+function merge() {   
+    local BASE_TREE="$C_BASE_REV"
+    local SOURCE_TREE="$C_SOURCE_BRANCH"
+    local ACTUAL_BASE_FILTER="${IN_BASE_FILTER:-$IN_FILTER}"
+    
+    # do the merge
+    prepare-remote-tree "BASE_TREE" "$C_BASE_PREFIX" "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" "$ACTUAL_BASE_FILTER" || return $?
+    prepare-remote-tree "SOURCE_TREE" "$C_SOURCE_BRANCH_PREFIX" "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" "$IN_FILTER" || return $?
+    
+    MERGE_FILE_CONFLICT_STYLE="$IN_MERGE_FILE_CONFLICT_STYLE" \
+    MERGE_FILE_MODE="$IN_MERGE_FILE_MODE" \
+    merge-resolve "$BASE_TREE" "$C_TARGET_BRANCH" "$SOURCE_TREE" || return $?
+       
+    if [[ -z "$(git status --porcelain)" ]]; then
+        >&2 echo "FATAL: No changes to pull/push."
+        return $CRITICAL_EXIT_CODE
+    fi
+}
+
+# Commit the merged working directory or save the current script state to be
+# picked up by `git subproject continue` and abort with exit code
+# $CAN_CONTINUE_EXIT_CODE.
+function commit() {
+    if ! git diff --no-ext-diff --quiet --exit-code --diff-filter=U; then
+        >&2 echo "FATAL: Committing is not possible because you have unmerged files."
+        >&2 echo "HINT: Fix them up in the work tree, and then use 'git add/rm <file>'"
+        >&2 echo "HINT: as appropriate to mark resolution. Finally continue with"
+        >&2 echo "HINT: \`git subproject continue\`."
+        
+        echo "STATE_REV=$(git rev-list HEAD -1)" > "$STATE_FILE"
+        
+        # Preserve input & context variables
+        for var in $(compgen -A variable); do
+            if [[ "$var" == IN_* || "$var" == C_* ]]; then
+                declare -p $var >> "$STATE_FILE"
+            fi
+        done
+        
+        exit $CAN_CONTINUE_EXIT_CODE
+    fi
+
+    git commit -m "$MESSAGE"
 }
 
 
@@ -486,18 +556,30 @@ function read-arguments() {
 # Mode implementation
 
 function do-init() {
-    if [[ -e "$MY_PREFIX" ]]; then
-        >&2 echo "ERROR: Prefix directory '$MY_PREFIX' already exists."
+    if [[ -e "$IN_MY_PREFIX" ]]; then
+        >&2 echo "FATAL: Prefix directory '$IN_MY_PREFIX' already exists."
         return $CRITICAL_EXIT_CODE
     fi
-
-    resolve-branch "THEIR_BRANCH" || return $CRITICAL_EXIT_CODE
-    local THEIR_REV=$( git rev-parse $THEIR_BRANCH )
-    local BASE_REV="$EMPTY_TREE"
-    local BASE_PREFIX=""
-    local LAST_KNOWN_THEIR_REV="$EMPTY_TREE"
+   
+    # stage 2 - prepare
+    C_MARKER="$PULL_MARKER"
+    C_SOURCE_BRANCH_SPEC="$IN_THEIR_BRANCH"
+    C_SOURCE_BRANCH_PREFIX="$IN_THEIR_PREFIX"
+    C_TARGET_BRANCH_SPEC="$MY_BRANCH"
+    C_TARGET_BRANCH_PREFIX="$IN_MY_PREFIX"
+    C_BASE_REV="$EMPTY_TREE"
+    C_BASE_PREFIX=
+    C_LAST_PUSH_MY_REV=
+    C_LAST_KNOWN_THEIR_REV=
     
-    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$BASE_REV" "$BASE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+    resolve-branch "C_SOURCE_BRANCH_SPEC" || return $?
+    C_SOURCE_BRANCH="$C_SOURCE_BRANCH_SPEC"
+    C_TARGET_BRANCH="$C_TARGET_BRANCH_SPEC"
+    resolve-foreign-branch "C_SOURCE_BRANCH" || return $?
+    finalize-message || return $?
+    
+    # stage 3 - merge & commit
+    merge-and-commit || return $?
 }
 
 function finish-init() { 
@@ -505,35 +587,15 @@ function finish-init() {
 }
 
 function do-pull() {
+    #
+    # stage 2 - prepare
+    C_MARKER="$PULL_MARKER"
     get-context || return $?
-       
-    # Determine base (first applicable option is used)
-    # 1. explicit BASE given by user
-    # 2. LAST_PUSH_MY_REV is newer than LAST_PULL_MY_REV:
-    #    use LAST_PUSH_MY_REV
-    # 3. use LAST_PULL_THEIR_REV
-    # Determine base prefix (first applicable option is used)
-    # 1. explicit BASE_PREFIX given by user
-    # 2. LAST_PUSH_MY_REV is newer than LAST_PULL_MY_REV: use LAST_PUSH_THEIR_PREFIX
-    # 3. LAST_PULL_THEIR_PREFIX
-    local PULL_BASE="$BASE"
-    local PULL_BASE_PREFIX="$BASE_PREFIX"
-    local LAST_KNOWN_THEIR_REV=
-    if [[ -n $LAST_PUSH_MY_REV && ( $LAST_PUSH_MY_REV == $LAST_PULL_MY_REV || -n $( git rev-list --first-parent $LAST_PULL_MY_REV..$LAST_PUSH_MY_REV ) ) ]]; then
-        set-if-zero "PULL_BASE" "$LAST_PUSH_MY_REV"
-        set-if-zero "PULL_BASE_PREFIX" "$LAST_PUSH_MY_PREFIX"
-        LAST_KNOWN_THEIR_REV="$LAST_PUSH_THEIR_REV"
-    else
-        set-if-zero "PULL_BASE" "$LAST_PULL_THEIR_REV"
-        set-if-zero "PULL_BASE_PREFIX" "$LAST_PULL_THEIR_PREFIX"
-        LAST_KNOWN_THEIR_REV="$LAST_PULL_THEIR_REV"
-    fi
-    
-    if [[ -n "$BASE" ]]; then
-        LAST_KNOWN_THEIR_REV=
-    fi
-    
-    merge-and-commit "$PULL_MARKER" "$MY_BRANCH" "$MY_PREFIX" "$THEIR_BRANCH" "$THEIR_PREFIX" "$PULL_BASE" "$PULL_BASE_PREFIX" "$LAST_KNOWN_THEIR_REV" || return $?
+    finalize-message || return $?
+
+    #
+    # stage 3 - merge & commit
+    merge-and-commit || return $?
 }
 
 function finish-pull() { 
@@ -541,66 +603,70 @@ function finish-pull() {
 }
 
 function do-push() {
+    #
+    # stage 2 - prepare
+    C_MARKER="$PUSH_MARKER"
     get-context  || return $?
-    
-    local PUSH_BASE=
-    local PUSH_BASE_PREFIX=
-    local LAST_KNOWN_THEIR_REV=
-    LAST_KNOWN_MY_REV="$LAST_PUSH_MY_REV"
-    if [[ -n $LAST_PUSH_MY_REV && ( $LAST_PUSH_MY_REV == $LAST_PULL_MY_REV || -n $( git rev-list --first-parent $LAST_PULL_MY_REV..$LAST_PUSH_MY_REV ) ) ]]; then
-        # Last PUSH is newer than last PULL
-        #
-        PUSH_BASE="$LAST_PUSH_MY_REV"
-        PUSH_BASE_PREFIX="$LAST_PUSH_MY_PREFIX"
-        LAST_KNOWN_THEIR_REV="$LAST_PUSH_THEIR_REV"
-    else
-        # LAST PULL is newest
-        #
-        PUSH_BASE="$LAST_PULL_THEIR_REV"
-        PUSH_BASE_PREFIX="$LAST_PULL_THEIR_PREFIX"
-        LAST_KNOWN_THEIR_REV="$LAST_PULL_THEIR_REV"
-    fi
     
     # refuse to push if their side has unknown changes
     local THEIRS_HAS_CHANGED=$FALSE
-    if [[ -z "$FILTER" ]]; then
+    if [[ -z "$IN_FILTER" ]]; then
         # without FILTER, there's no need for a complex pipeline
-        if ! git diff --no-ext-diff --quiet --exit-code $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX"; then
+        if ! git diff --no-ext-diff --quiet --exit-code $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH -- "$C_SOURCE_BRANCH_PREFIX"; then
             THEIRS_HAS_CHANGED=$TRUE
         fi
     else
         # with FILTER, the list of changed files needs to be filtered
-        if git diff --name-only --no-ext-diff --relative="$THEIR_PREFIX" $LAST_KNOWN_THEIR_REV..$THEIR_BRANCH -- "$THEIR_PREFIX" | grep -q --perl-regexp "$FILTER"; then
+        if git diff --name-only --no-ext-diff --relative="$C_SOURCE_BRANCH_PREFIX" $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH -- "$C_SOURCE_BRANCH_PREFIX" | grep -q --perl-regexp "$IN_FILTER"; then
             THEIRS_HAS_CHANGED=$TRUE
         fi
     fi
     if [[ $THEIRS_HAS_CHANGED -eq $TRUE ]]; then
-        >&2 echo "ERROR: Their branch '$THEIR_BRANCH' has changes that have not been pulled."
-        >&2 echo "ERROR: You need to pull these changes first!"
+        >&2 echo "FATAL: Their branch '$C_SOURCE_BRANCH_SPEC' has changes that have not been pulled."
+        >&2 echo "FATAL: You need to pull these changes first!"
         exit $CRITICAL_EXIT_CODE
     fi
     
-    if [[ -z "$LAST_KNOWN_MY_REV" ]]; then 
-        LAST_KNOWN_MY_REV="$EMPTY_TREE"
-    fi
+    # swap source & target branches
+    swap-vars "C_SOURCE_BRANCH_SPEC" "C_TARGET_BRANCH_SPEC"
+    swap-vars "C_SOURCE_BRANCH" "C_TARGET_BRANCH"
+    swap-vars "C_SOURCE_BRANCH_PREFIX" "C_TARGET_BRANCH_PREFIX"
+    C_SOURCE_HISTORY_OFFSET="$C_LAST_PUSH_MY_REV"
     
-    git checkout -q "$THEIR_BRANCH"
-    merge-and-commit "$PUSH_MARKER" "$THEIR_BRANCH" "$THEIR_PREFIX" "$MY_BRANCH" "$MY_PREFIX" "$PUSH_BASE" "$PUSH_BASE_PREFIX" "$LAST_KNOWN_MY_REV" || return $?
+    # build commit message
+    finalize-message
+    
+    #
+    # stage 3 - merge & commit
+    # note: need to checkout their branch first!
+    git checkout -q "$C_TARGET_BRANCH" || return $CRITICAL_EXIT_CODE
+    merge-and-commit || return $?
 }
 
 function finish-push() {
-    git checkout -q "$MY_BRANCH"
+    git checkout -q "$MY_BRANCH" || return $?
+    
+    # note: source & target have been swapped by do-push!
+    if [[ "$C_TARGET_BRANCH_SPEC" != "$C_TARGET_BRANCH" ]]; then
+        local PARTS=( ${C_TARGET_BRANCH_SPEC//::/ } )
+        local URL="${PARTS[0]}"
+        local REMOTE_NAME=$(
+            echo -n "${PARTS[1]}" | sed -e 's/^(refs\/)?(heads\/)?\/?//' )
+        
+        git push "$URL" "refs/heads/$C_TARGET_BRANCH:refs/heads/$REMOTE_NAME" \
+            || return $CRITICAL_EXIT_CODE
+    fi
 }
 
 function do-continue() {
     if [[ ! -f "$STATE_FILE" ]]; then
-        >&2 echo "ERROR: Nothing to continue!"
+        >&2 echo "FATAL: Nothing to continue!"
         return $CRITICAL_EXIT_CODE
     fi
     
     . "$GIT_REPO/GIT_SUBPROJECT_CONTINUE"
     if [[ "$STATE_REV" != $(git rev-list HEAD -1) ]]; then
-        >&2 echo "ERROR: Nothing to continue!"
+        >&2 echo "FATAL: Nothing to continue!"
         return $CRITICAL_EXIT_CODE
     fi
     
@@ -621,14 +687,14 @@ function finish-continue() {
 cd $(git rev-parse --show-toplevel)
 
 read-arguments "$@"
-if [[ "$MODE" != "continue" ]]; then
+if [[ "$IN_MODE" != "continue" ]]; then
     fail-if-dirty
 fi
 
-eval "do-$MODE"
+eval "do-$IN_MODE"
 DO_STATUS=$?
 
-eval "finish-$MODE $DO_STATUS"
+eval "finish-$IN_MODE $DO_STATUS"
 FINISH_STATUS=$?
 
 [[ $DO_STATUS -ne 0 ]] && exit $DO_STATUS || exit $FINISH_STATUS

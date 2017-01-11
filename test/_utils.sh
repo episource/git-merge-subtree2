@@ -1,6 +1,17 @@
 #!/bin/bash
 set -o pipefail
 
+
+function add-to-path() {
+    if [[ -z "$NO_ADD_TO_PATH" ]]; then
+        local REPO_ROOT="$( git rev-parse --show-toplevel )"
+        command -v cygpath &> /dev/null && REPO_ROOT="$( cygpath $REPO_ROOT )"
+        
+        export PATH="$REPO_ROOT:$PATH"
+        export NO_ADD_TO_PATH=true  
+    fi
+}
+
 function invoke-test() {
     local RUNDIR=$(mktemp -d)
     cd "$RUNDIR"
@@ -55,3 +66,6 @@ function invoke-all() {
     echo "PASSED: $PASSED_COUNT FAILED: $FAILED_COUNT"
     exit $FAILED_COUNT
 }
+
+
+add-to-path

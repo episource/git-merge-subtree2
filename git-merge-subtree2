@@ -121,4 +121,4 @@ prepare-remote-tree "THEIRS" "$THEIR_PREFIX" "$MINE" "$MY_PREFIX"
 #
 # Merge
 
-merge-resolve "$MINE" "$THEIRS" "$BASE" || exit $?
+merge-resolve "$BASE" "$MINE" "$THEIRS" || exit $?
