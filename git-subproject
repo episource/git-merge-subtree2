@@ -548,7 +548,7 @@ function commit() {
         exit $CAN_CONTINUE_EXIT_CODE
     fi
 
-    git commit -m "$MESSAGE"
+    echo -n "$C_MESSAGE" | git commit --file=-
 }
 
 
