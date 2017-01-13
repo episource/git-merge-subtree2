@@ -83,8 +83,11 @@ Init:
     
        my-prefix: mandatory - subdirectory in which their branch will be
                   included
-    their-branch: mandatory - branch to be merged into a subdirectory of the
-                  current branch
+    their-branch: mandatory - source branch to be merged into a subdirectory of
+                  the current branch; branches from the current repository and
+                  branches from different repositories ("foreign" branches) are
+                  allowed - the syntax "<repourl>::<branch>" is used for foreign
+                  branches (they are fetched temporarily)
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
           filter: optional - limit merging to the set of files matching the
@@ -378,6 +381,7 @@ function get-context() {
     resolve-branch "C_SOURCE_BRANCH_SPEC" || return $?
     C_SOURCE_BRANCH="$C_SOURCE_BRANCH_SPEC"
     C_TARGET_BRANCH="$C_TARGET_BRANCH_SPEC"
+    resolve-foreign-branch "C_SOURCE_BRANCH" || return $?
     
     
     #
@@ -694,7 +698,7 @@ fi
 eval "do-$IN_MODE"
 DO_STATUS=$?
 
-eval "finish-$IN_MODE $DO_STATUS"
+eval "finish-$IN_MODE $DO_STATUS" && resolve-foreign-branch-cleanup
 FINISH_STATUS=$?
 
 [[ $DO_STATUS -ne 0 ]] && exit $DO_STATUS || exit $FINISH_STATUS

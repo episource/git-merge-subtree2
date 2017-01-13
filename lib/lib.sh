@@ -262,6 +262,39 @@ function resolve-branch() {
     return $CRITICAL_EXIT_CODE
 }
 
+# Fetches a foreign branch to a temporary local branch and returns the temporary
+# branch's name. If a reference to a local branch is passed, it is ignored.
+# The argument <branch_var> is updated to the name of the temporary branch.
+# Arguments: <branch_var>
+#    <branch_var>: name of a foreign repository or name of a local branch
+function resolve-foreign-branch() {
+    local -n BRANCH_VAR=$1
+    
+    if [[ "$BRANCH_VAR" != *"::"* ]]; then
+        return 0
+    fi
+    
+    local TMP_BRANCH_HASH=$(
+        echo "$BRANCH_VAR" | git hash-object -t blob --stdin )
+    local TMP_BRANCH_NAME="git-subproject-tmp-$TMP_BRANCH_HASH"
+    
+    local PARTS=( ${BRANCH_VAR//::/ } )
+    local URL="${PARTS[0]}"
+    local BRANCH_NAME=$(
+        echo -n "${PARTS[1]}" | sed -e 's/^(refs\/)?(heads\/)?\/?//' )
+    
+    git fetch "$URL" "+refs/heads/$BRANCH_NAME:refs/heads/$TMP_BRANCH_NAME" || \
+        return $CRITICAL_EXIT_CODE
+        
+    BRANCH_VAR="$TMP_BRANCH_NAME"
+}
+
+# Remove temporary branches created by resolve-foreign-branch.
+function resolve-foreign-branch-cleanup() {
+    git branch | grep -P "git-subproject-tmp-[a-fA-F0-9]{40}" \
+        | xargs -r git branch -D
+}
+
 # Set $1=$2 if [[ -z "$1" ]]
 function set-if-zero() {
     declare -n VAR=$1
