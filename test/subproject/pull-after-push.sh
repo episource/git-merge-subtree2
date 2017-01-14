@@ -57,7 +57,7 @@ EOF
     git add -A
     git commit -m "source: replace 2nd line 'x' with 'y'"
     
-    # Pull again - their should be no conflict (no local changes)!
+    # Pull again - there should be no conflict (no local changes)!
     git checkout target
     git subproject pull my-subproject --diff3 || return 1
 

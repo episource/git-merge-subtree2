@@ -23,6 +23,7 @@ IN_MESSAGE=
 IN_HISTORY_FORMAT="medium"
 IN_MERGE_FILE_CONFLICT_STYLE=""
 IN_MERGE_FILE_MODE=""
+IN_IGNORE_ID=
 
 #
 # Context Variables
@@ -33,7 +34,8 @@ IN_MERGE_FILE_MODE=""
 ##       during PULL/INIT: SOURCE - my branch   ; TARGET - their branch
 ##       during PUSH     : Source - their branch; TARGET - my branch
 C_MARKER="$PULL_MARKER"   # Either $PULL_MARKER or $PUSH_MARKER - used to format
-                          # commit message 
+                          # commit message
+C_SUBPROJECT_ID=          # Unique identifier for the current subproject
 C_SOURCE_BRANCH_SPEC=     # Source branch (foreign branch reference unresolved)
 C_SOURCE_BRANCH=          # Source branch (foreign branch reference resolved)
 C_SOURCE_BRANCH_PREFIX=   # Source branch's prefix directory - may be empty
@@ -75,7 +77,7 @@ also be merged back into the source branch.
     
 git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob]
 git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
-git subproject push <my-prefix> [-m <message>] [--format=<format>]
+git subproject push <my-prefix> [-m <message>] [--format=<format>] [--ignore-id]
 
 Init:
     Copy a remote branch's content to a subdirectory <my-prefix> of the current
@@ -152,6 +154,8 @@ filter-is-regexp: optional - interpret --filter as perl style regular expression
                   \`--format=\` to suppress the history
            diff3: optional - show conflicts in "diff3" style, that is the common
                   ancestor's version is included in confict markers
+       ignore-id: optional - ignore the subproject id when searching their
+                  branch's history for subproject commits
             ours:
           theirs:
            union: optional - resolve conflicts favouring our (or their or both)
@@ -166,6 +170,8 @@ Push:
           format: optional - pass to \`git log\`'s format option when appending
                   a description of the merged history to the commit message; use
                   \`--format=\` to suppress the history
+       ignore-id: optional - ignore the subproject id when searching their
+                  branch's history for subproject commits
                   
 Continue:
     Continue a pull/push operation after merge conflicts have been resolved.
@@ -188,8 +194,8 @@ EOF
 function read-arguments() {
     local COMMON_ARGS=( "-m" "--message" "--format" )
     local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" )
-    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" "--base-filter" "--diff3" "--ours" "--theirs" "--union")
-    local PUSH_ARGS=( "${COMMON_ARGS[@]}" )
+    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" "--base-filter" "--diff3" "--no-diff3" "--ours" "--theirs" "--union" "--ignore-id" )
+    local PUSH_ARGS=( "${COMMON_ARGS[@]}" "--ignore-id" )
     local CONTINUE_ARGS=( )
     local -n ALLOWED_ARGS
 
@@ -289,6 +295,9 @@ function read-arguments() {
             --union)
                 IN_MERGE_FILE_MODE="-Xunion"
                 ;;
+            --ignore-id)
+                IN_IGNORE_ID="true"
+                ;;
             *)
                 help
                 ;;
@@ -313,6 +322,18 @@ function read-arguments() {
 
 ## 2. Preparation
 
+# Generate a new subproject id if C_SUBPROJECT_ID is empty.
+function ensure-id() {
+    if [[ -z "$C_SUBPROJECT_ID" ]]; then
+        local REPO_DIR=$( git rev-parse --show-toplevel )
+        local THE_DATE=$( date --rfc-3339=seconds )
+        
+        C_SUBPROJECT_ID=$( \
+            echo "$THE_DATE-$REPO_DIR-$MY_BRANCH-$IN_MY_PREFIX" \
+            | git hash-object -t blob --stdin )
+    fi
+}
+
 # Parse history to figure out context variables: subproject commits are marked
 # with either $PUSH_MARKERs or $PULL_MARKERs.
 # Initializes all context variables accept C_MARKER and C_MESSAGE to defaults
@@ -331,7 +352,7 @@ function get-context() {
         >&2 echo "FATAL: Prefix directory '$IN_MY_PREFIX' not found."
         return $CRITICAL_EXIT_CODE
     fi
-
+    
     
     #
     # Parse my history
@@ -366,6 +387,9 @@ function get-context() {
                     IN_BASE_FILTER="$VAL"
                 fi
                 ;;
+            -Xid=*)
+                C_SUBPROJECT_ID="$VAL"
+                ;;
         esac
     done
     
@@ -386,7 +410,12 @@ function get-context() {
     
     #
     # Parse their history
-    local LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$IN_MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $C_SOURCE_BRANCH --not $IN_BASE )
+    if [[ -z "$C_SUBPROJECT_ID" || -n "$IN_IGNORE_ID" ]]; then
+        local LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent --perl-regexp "--grep=^$PUSH_MARKER(?=.*-Xtheir-prefix=\"$IN_MY_PREFIX\")(?=.*-Xtheir-branch=\"$MY_BRANCH\")" $C_SOURCE_BRANCH --not $IN_BASE )
+    else
+        local LAST_PUSH_THEIR_REV=$( git rev-list -1 --first-parent "--grep=^$PUSH_MARKER.*-Xid=\"$C_SUBPROJECT_ID\"" $C_SOURCE_BRANCH --not $IN_BASE )
+    fi
+    
     if [[ -n "$LAST_PUSH_THEIR_REV" ]]; then
         local THEIR_CONFIG=$( git log -1 --format=%s%n%b $LAST_PUSH_THEIR_REV | grep "^$PUSH_MARKER" | sed -e "s/^$PUSH_MARKER\s*//")
         
@@ -406,6 +435,11 @@ function get-context() {
             esac
         done
     fi
+    
+    
+    #
+    # Generate id if missing (old project)
+    ensure-id
     
     
     #
@@ -444,7 +478,7 @@ function get-context() {
 # considered. The history format is taken from $IN_HISTORY_FORMAT.
 function finalize-message() {
     local SOURCE_REV=$( git rev-parse $C_SOURCE_BRANCH )
-    local MARKER_LINE="$C_MARKER -Xmy-prefix=\"$C_TARGET_BRANCH_PREFIX\" -Xtheir-branch=\"$C_SOURCE_BRANCH_SPEC\" -Xtheir-prefix=\"$C_SOURCE_BRANCH_PREFIX\" -Xtheir-rev=\"$SOURCE_REV\" -Xfilter=\"$IN_FILTER\""
+    local MARKER_LINE="$C_MARKER -Xid=\"$C_SUBPROJECT_ID\" -Xmy-prefix=\"$C_TARGET_BRANCH_PREFIX\" -Xtheir-branch=\"$C_SOURCE_BRANCH_SPEC\" -Xtheir-prefix=\"$C_SOURCE_BRANCH_PREFIX\" -Xtheir-rev=\"$SOURCE_REV\" -Xfilter=\"$IN_FILTER\""
     
     C_MESSAGE="$IN_MESSAGE"
     if [[ -z "$C_MESSAGE" ]]; then
@@ -517,8 +551,12 @@ function merge() {
     local ACTUAL_BASE_FILTER="${IN_BASE_FILTER:-$IN_FILTER}"
     
     # do the merge
-    prepare-remote-tree "BASE_TREE" "$C_BASE_PREFIX" "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" "$ACTUAL_BASE_FILTER" || return $?
-    prepare-remote-tree "SOURCE_TREE" "$C_SOURCE_BRANCH_PREFIX" "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" "$IN_FILTER" || return $?
+    prepare-remote-tree "BASE_TREE" "$C_BASE_PREFIX" \
+        "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" \
+        "$ACTUAL_BASE_FILTER" || return $?
+    prepare-remote-tree "SOURCE_TREE" "$C_SOURCE_BRANCH_PREFIX" \
+        "$C_TARGET_BRANCH" "$C_TARGET_BRANCH_PREFIX" \
+        "$IN_FILTER" || return $?
     
     MERGE_FILE_CONFLICT_STYLE="$IN_MERGE_FILE_CONFLICT_STYLE" \
     MERGE_FILE_MODE="$IN_MERGE_FILE_MODE" \
@@ -566,6 +604,7 @@ function do-init() {
     fi
    
     # stage 2 - prepare
+    ensure-id
     C_MARKER="$PULL_MARKER"
     C_SOURCE_BRANCH_SPEC="$IN_THEIR_BRANCH"
     C_SOURCE_BRANCH_PREFIX="$IN_THEIR_PREFIX"
@@ -616,12 +655,18 @@ function do-push() {
     local THEIRS_HAS_CHANGED=$FALSE
     if [[ -z "$IN_FILTER" ]]; then
         # without FILTER, there's no need for a complex pipeline
-        if ! git diff --no-ext-diff --quiet --exit-code $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH -- "$C_SOURCE_BRANCH_PREFIX"; then
+        if ! git diff --no-ext-diff --quiet --exit-code \
+                $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH \
+                -- "$C_SOURCE_BRANCH_PREFIX"; then
             THEIRS_HAS_CHANGED=$TRUE
         fi
     else
         # with FILTER, the list of changed files needs to be filtered
-        if git diff --name-only --no-ext-diff --relative="$C_SOURCE_BRANCH_PREFIX" $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH -- "$C_SOURCE_BRANCH_PREFIX" | grep -q --perl-regexp "$IN_FILTER"; then
+        if git diff --name-only --no-ext-diff \
+                --relative="$C_SOURCE_BRANCH_PREFIX" \
+                $C_LAST_KNOWN_THEIR_REV..$C_SOURCE_BRANCH \
+                -- "$C_SOURCE_BRANCH_PREFIX" \
+                | grep -q --perl-regexp "$IN_FILTER"; then
             THEIRS_HAS_CHANGED=$TRUE
         fi
     fi
