@@ -24,6 +24,7 @@ IN_HISTORY_FORMAT="medium"
 IN_MERGE_FILE_CONFLICT_STYLE=""
 IN_MERGE_FILE_MODE=""
 IN_IGNORE_ID=
+IN_ALLOW_EMPTY=
 
 #
 # Context Variables
@@ -76,8 +77,8 @@ within the merge commit's message to simplify later updates. A subproject can
 also be merged back into the source branch.
     
 git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
-git subproject push <my-prefix> [-m <message>] [--format=<format>] [--ignore-id]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--ignore-id] [--allow-empty] [--diff3|--no-diff3] [--ours|--theirs|--union]
+git subproject push <my-prefix> [-m <message>] [--format=<format>] [--ignore-id] [--allow-empty]
 
 Init:
     Copy a remote branch's content to a subdirectory <my-prefix> of the current
@@ -154,12 +155,15 @@ filter-is-regexp: optional - interpret --filter as perl style regular expression
                   \`--format=\` to suppress the history
            diff3: optional - show conflicts in "diff3" style, that is the common
                   ancestor's version is included in confict markers
+        no-diff3: optional - disable diff3-mode when enabled by default
        ignore-id: optional - ignore the subproject id when searching their
                   branch's history for subproject commits
+     allow-empty: optional - allow empty commits
             ours:
           theirs:
            union: optional - resolve conflicts favouring our (or their or both)
-                  side of the lines.
+                  side of the lines; note: ours creates empty commits (implies
+                  --allow-empty)
            
 Push:
     Push local changes to the upstream branch. Refused if the upstream branch
@@ -172,6 +176,7 @@ Push:
                   \`--format=\` to suppress the history
        ignore-id: optional - ignore the subproject id when searching their
                   branch's history for subproject commits
+     allow-empty: optional - allow empty commits
                   
 Continue:
     Continue a pull/push operation after merge conflicts have been resolved.
@@ -194,8 +199,8 @@ EOF
 function read-arguments() {
     local COMMON_ARGS=( "-m" "--message" "--format" )
     local INIT_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--their-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" )
-    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" "--base-filter" "--diff3" "--no-diff3" "--ours" "--theirs" "--union" "--ignore-id" )
-    local PUSH_ARGS=( "${COMMON_ARGS[@]}" "--ignore-id" )
+    local PULL_ARGS=( "${COMMON_ARGS[@]}" "--their-branch" "--base" "--their-prefix" "--base-prefix" "--filter" "--filter-is-regexp" "--filter-is-glob" "--base-filter" "--diff3" "--no-diff3" "--ours" "--theirs" "--union" "--ignore-id" "--allow-empty" )
+    local PUSH_ARGS=( "${COMMON_ARGS[@]}" "--ignore-id" "--allow-empty" )
     local CONTINUE_ARGS=( )
     local -n ALLOWED_ARGS
 
@@ -247,6 +252,9 @@ function read-arguments() {
         local VAL="${1##*=}"
         
         case "$1" in
+            --allow-empty)
+                IN_ALLOW_EMPTY="true"
+                ;;
             --base=*)
                 IN_BASE="$VAL"
                 ;;
@@ -258,7 +266,7 @@ function read-arguments() {
                 normalize-prefix "IN_BASE_PREFIX"
                 ;;
             --diff3)
-                IN_MERGE_FILE_CONFLICT_STYLE="-Xdiff3"
+                IN_MERGE_FILE_CONFLICT_STYLE="--diff3"
                 ;;
             --filter=*)
                 IN_FILTER="$VAL"
@@ -272,6 +280,9 @@ function read-arguments() {
             --format=*)
                 IN_HISTORY_FORMAT="$VAL"
                 ;;
+            --ignore-id)
+                IN_IGNORE_ID="true"
+                ;;
             -m)
                 IN_MESSAGE="$2"
                 shift
@@ -279,11 +290,15 @@ function read-arguments() {
             --message=*)
                 IN_MESSAGE="$VAL"
                 ;;
+            --no-diff3)
+                IN_MERGE_FILE_CONFLICT_STYLE="--no-diff3"
+                ;;
             --ours)
-                IN_MERGE_FILE_MODE="-Xours"
+                IN_MERGE_FILE_MODE="--ours"
+                IN_ALLOW_EMPTY="true"
                 ;;
             --theirs)
-                IN_MERGE_FILE_MODE="-Xtheirs"
+                IN_MERGE_FILE_MODE="--theirs"
                 ;;
             --their-branch=*)
                 IN_THEIR_BRANCH="$VAL"
@@ -293,10 +308,7 @@ function read-arguments() {
                 normalize-prefix "IN_THEIR_PREFIX"
                 ;;
             --union)
-                IN_MERGE_FILE_MODE="-Xunion"
-                ;;
-            --ignore-id)
-                IN_IGNORE_ID="true"
+                IN_MERGE_FILE_MODE="--union"
                 ;;
             *)
                 help
@@ -562,7 +574,7 @@ function merge() {
     MERGE_FILE_MODE="$IN_MERGE_FILE_MODE" \
     merge-resolve "$BASE_TREE" "$C_TARGET_BRANCH" "$SOURCE_TREE" || return $?
        
-    if [[ -z "$(git status --porcelain)" ]]; then
+    if [[ -z "$IN_ALLOW_EMPTY" && -z "$(git status --porcelain)" ]]; then
         >&2 echo "FATAL: No changes to pull/push."
         return $CRITICAL_EXIT_CODE
     fi
@@ -590,7 +602,11 @@ function commit() {
         exit $CAN_CONTINUE_EXIT_CODE
     fi
 
-    echo -n "$C_MESSAGE" | git commit --file=-
+    local COMMIT_ARGS=""
+    if [[ -n "$IN_ALLOW_EMPTY" ]]; then
+        COMMIT_ARGS="--allow-empty"
+    fi
+    echo -n "$C_MESSAGE" | git commit $COMMIT_ARGS --file=-
 }
 
 
