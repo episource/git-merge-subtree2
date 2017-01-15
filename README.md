@@ -30,15 +30,15 @@ Add a working copy of this repository to your path.
 ```
 $ git subproject help
 Include another branch or a subdirectory thereof as subdirectory of the
-current branch. By refering to remote branches, other repositories can be
-included as well. Subproject merges like `git merge --squash`, so that the
-history does not become cluttered. Source branch and commit are remembered
-within the merge commit's message to simplify later updates. A subproject can
-also be merged back into the source branch.
+current branch. Foreign branches from different repositories are supported as
+well. Subproject merges like `git merge --squash`, so that the history does
+not become cluttered. Source branch and commit are remembered within the merge
+commit's message to simplify later updates. A subproject can also be merged back
+into the source branch.
     
 git subproject init <my-prefix> (--their-branch=<their-branch> | <their-branch>) [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob]
-git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--diff3] [--ours|--theirs|--union]
-git subproject push <my-prefix> [-m <message>] [--format=<format>]
+git subproject pull <my-prefix> [-m <message>] [--format=<format>] [--their-prefix=<their-prefix>] [--filter=<filter>] [--filter-is-regexp|--filter-is-glob] [--their-branch=<their-branch>] [--base=<base>] [--base-prefix=<base-prefix>] [--base-filter=<base-filter>] [--ignore-id] [--allow-empty] [--diff3|--no-diff3] [--ours|--theirs|--union]
+git subproject push <my-prefix> [-m <message>] [--format=<format>] [--ignore-id] [--allow-empty]
 
 Init:
     Copy a remote branch's content to a subdirectory <my-prefix> of the current
@@ -46,8 +46,11 @@ Init:
     
        my-prefix: mandatory - subdirectory in which their branch will be
                   included
-    their-branch: mandatory - branch to be merged into a subdirectory of the
-                  current branch
+    their-branch: mandatory - source branch to be merged into a subdirectory of
+                  the current branch; branches from the current repository and
+                  branches from different repositories ("foreign" branches) are
+                  allowed - the syntax "<repourl>::<branch>" is used for foreign
+                  branches (they are fetched temporarily)
     their-prefix: optional - limit merging to this subdirectory of their
                   branch
           filter: optional - limit merging to the set of files matching the
@@ -112,10 +115,15 @@ filter-is-regexp: optional - interpret --filter as perl style regular expression
                   `--format=` to suppress the history
            diff3: optional - show conflicts in "diff3" style, that is the common
                   ancestor's version is included in confict markers
+        no-diff3: optional - disable diff3-mode when enabled by default
+       ignore-id: optional - ignore the subproject id when searching their
+                  branch's history for subproject commits
+     allow-empty: optional - allow empty commits
             ours:
           theirs:
            union: optional - resolve conflicts favouring our (or their or both)
-                  side of the lines.
+                  side of the lines; note: ours creates empty commits (implies
+                  --allow-empty)
            
 Push:
     Push local changes to the upstream branch. Refused if the upstream branch
@@ -126,6 +134,9 @@ Push:
           format: optional - pass to `git log`'s format option when appending
                   a description of the merged history to the commit message; use
                   `--format=` to suppress the history
+       ignore-id: optional - ignore the subproject id when searching their
+                  branch's history for subproject commits
+     allow-empty: optional - allow empty commits
                   
 Continue:
     Continue a pull/push operation after merge conflicts have been resolved.
@@ -134,6 +145,6 @@ Continue:
 ## Known issues
 
 - On windows it might be necessary to export `MSYS="noglob"` when dealing with
-  filters containing escaped backslashes (`\`) together with any of the
+  filters containing escaped backslashes (``) together with any of the
   characters `~?*["'(){}` - see [git-for-windows/git#1019](https://github.com/git-for-windows/git/issues/1019)
   for details

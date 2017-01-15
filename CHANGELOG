@@ -1,4 +1,4 @@
-# v0.3.0 (SNAPSHOT)
+# v0.3.0 (2017-01-15)
 - Add subprojects based on "foreign" branches, that is a source branch located
   in a different repository. Such "foreign" branches are fetched and pushed
   automatically.
