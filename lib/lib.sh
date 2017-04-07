@@ -70,20 +70,6 @@ function glob-to-regexp() {
             || CHAR_VAR=""
     }
     
-    function _regexp-escape-char() {
-        # escape any of these: .^$*+-?()[]{}\|
-        case "$1" in
-            #escape any of these
-            '.'|'^'|'$'|'*'|'+'|'-'|'?'|'('|')'|'['|']'|'{'|'}'|'\'|'|')
-                echo -n "\\$1"
-                ;;
-            *)
-                echo -n "$1"
-                ;;
-        esac
-    }
-    
-    
     local GLOB_IDX=0
     local CHAR=""
     while [[ $GLOB_IDX -lt $GLOB_LEN ]]; do
@@ -165,11 +151,11 @@ function glob-to-regexp() {
                     if [[ "$NEXT_CHAR" == '\' ]]; then
                         # the escaped character follows
                         (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
-                        GROUP_STRING+="$( _regexp-escape-char "$NEXT_CHAR" )"
+                        GROUP_STRING+="$( regexp-escape-string "$NEXT_CHAR" )"
                     elif [[ "$NEXT_CHAR" == "-" ]]; then
                         GROUP_STRING+="$NEXT_CHAR"
                     else
-                        GROUP_STRING+="$( _regexp-escape-char "$NEXT_CHAR" )"
+                        GROUP_STRING+="$( regexp-escape-string "$NEXT_CHAR" )"
                     fi
                     
                     (( GROUP_IDX++ )) && _get_char "NEXT_CHAR" $GROUP_IDX
@@ -189,7 +175,7 @@ function glob-to-regexp() {
                 if [[ $GLOB_IDX -eq $GLOB_LEN ]]; then
                     REGEXP+="\\"
                 else
-                    REGEXP+="$( _regexp-escape-char "${GLOB:$GLOB_IDX:1}" )"
+                    REGEXP+="$( regexp-escape-string "${GLOB:$GLOB_IDX:1}" )"
                     (( GLOB_IDX++ ))
                 fi
                 ;;
@@ -197,7 +183,7 @@ function glob-to-regexp() {
                 REGEXP+="$|^"
                 ;;
             *)
-                REGEXP+="$( _regexp-escape-char "$CHAR" )"
+                REGEXP+="$( regexp-escape-string "$CHAR" )"
                 ;;
         esac
     done
@@ -221,6 +207,29 @@ function normalize-prefix() {
     local -n PREFIX_VAR=$1
     PREFIX_VAR=$( echo -n "$PREFIX_VAR" | sed -r -e "s/\/+/\//g" -e "s/^\/+//" -e "s/\/+$//" )
 }
+
+# Escape regexp string $1 and return the result via stdout.
+function regexp-escape-string() {
+    RESULT="";
+    for (( i=0; i<${#1}; i++ )); do
+        CHAR="${1:$i:1}"
+        
+        # escape any of these: .^$*+-?()[]{}\|
+        case "$CHAR" in
+            #escape any of these
+            '.'|'^'|'$'|'*'|'+'|'-'|'?'|'('|')'|'['|']'|'{'|'}'|'\'|'|')
+                RESULT+="\\$CHAR"
+                ;;
+            *)
+                RESULT+="$CHAR"
+                ;;
+        esac
+    done
+    
+    echo -n "$RESULT"
+}
+
+# Escape any special regexp 
 
 # Validate and resolve the branch/reference name stored in a variable named $1
 # (first argument) to an unambigious name:
@@ -344,7 +353,8 @@ function prepare-remote-tree() {
     
     # if specified, extract the tree object corresponding to $REMOTE_PREFIX
     if [[ -n "$SOURCE_PREFIX" ]]; then
-        LS_TREE_RESULT=( $(git ls-tree -rd "$SOURCE_TREE_VAR" | grep --perl-regexp "\t$SOURCE_PREFIX$" --max-count 1) )
+        SOURCE_PREFIX_PATTERN=$( regexp-escape-string "$SOURCE_PREFIX" )
+        LS_TREE_RESULT=( $(git ls-tree -rd "$SOURCE_TREE_VAR" | grep --perl-regexp "\t$SOURCE_PREFIX_PATTERN$" --max-count 1) )
         
         if [[ -z ${LS_TREE_RESULT[@]} ]]; then
             >&2 echo "'$SOURCE_TREE_VAR' does not include a directory '$SOURCE_PREFIX'"
